@@ -1,58 +1,33 @@
 /**
+ * Antigravity Usage Intelligence - Desktop Client Native Plugin
+ * --------------------------------------------------------------------------
+ * Original Concept: https://github.com/Nir-Bhay/antigravity-usage-intelligence
+ * Original Author : Nirbhay Hiwse (https://github.com/Nir-Bhay)
+ * License         : MIT License
+ * Ported & Adapted: Reverse-engineered and adapted into Antigravity Electron
+ *                   native preload/IPC architecture with 100% full Chinese localization
+ *                   by easonn1 (https://github.com/easonn1)
+ * --------------------------------------------------------------------------
+ */
+/**
  * Antigravity Plugin: 📊 用量智脑 (Usage Intelligence)
- * 版本: 1.0.1
+ * 版本: 1.2.0 (Pure Sandbox IPC Architecture, High-Definition Dark Glassmorphism)
  * 功能: 深度分析 Antigravity 交互日志与配额，提供实时 Token 消耗、Prompt 缓存节省、思考 Token 占比、活跃热力图与 24h 峰值时段分析。
  */
 (function() {
   if (window.__ag_usage_intelligence_injected) return;
   window.__ag_usage_intelligence_injected = true;
 
-  const os = typeof require === 'function' ? require('os') : null;
-  const fs = typeof require === 'function' ? require('fs') : null;
-  const path = typeof require === 'function' ? require('path') : null;
-  const cp = typeof require === 'function' ? require('child_process') : null;
+  // 渲染进程严格沙盒环境，仅允许使用 electron 的 IPC Bridge
+  const electron = typeof electron_1 !== 'undefined' ? electron_1 : (typeof require === 'function' ? (function() {
+    try { return require('electron'); } catch (e) { return null; }
+  })() : (window.electron || null));
 
   let cachedStats = null;
   let isFetching = false;
   let modalVisible = false;
 
-  // 安全获取主目录与文件路径
-  function getPaths() {
-    let home = 'C:\\Users\\Default';
-    try {
-      if (os && typeof os.homedir === 'function') {
-        home = os.homedir();
-      } else if (typeof process !== 'undefined' && process && process.env) {
-        home = process.env.USERPROFILE || process.env.HOME || home;
-      }
-    } catch (e) {}
-
-    const pluginDir = path ? path.join(home, '.gemini', 'antigravity', 'plugins') : '';
-    const collector = path ? path.join(pluginDir, 'collector.py') : '';
-    const dashboardHtml = path ? path.join(pluginDir, 'dashboard.html') : '';
-    return { pluginDir, collector, dashboardHtml };
-  }
-
-  // 定位 Python 执行器
-  function getPythonBin() {
-    const candidates = [
-      'C:\\Program Files\\Python312\\python.exe',
-      'C:\\Program Files\\Python311\\python.exe',
-      'C:\\Program Files\\Python310\\python.exe',
-      'python',
-      'py'
-    ];
-    if (fs) {
-      for (const p of candidates) {
-        try {
-          if (p.includes('\\') && fs.existsSync(p)) return p;
-        } catch (e) {}
-      }
-    }
-    return 'python';
-  }
-
-  // 格式化数字
+  // 格式化数字 (如 933.2M, 1.2B, 15.4k)
   function formatNum(num) {
     if (num == null) return '0';
     if (num >= 1000000000) return (num / 1000000000).toFixed(2) + 'B';
@@ -61,7 +36,7 @@
     return String(num);
   }
 
-  // 查找模型按钮
+  // 查找模型切换按钮（作为定位参考点）
   function findModelTriggerButton() {
     try {
       const testIdBtn = document.querySelector('[data-testid="model-selector-trigger"]');
@@ -79,47 +54,81 @@
     }
   }
 
-  // 异步获取统计数据
-  function fetchStats(forceRefresh, callback) {
+  // 通过主进程 IPC 异步获取用量数据
+  async function fetchStats(forceRefresh, callback) {
     if (isFetching) return;
     if (cachedStats && !forceRefresh) {
       if (callback) callback(cachedStats);
       return;
     }
 
-    const { collector } = getPaths();
-    if (!collector || !fs) return;
-    if (!fs.existsSync(collector)) {
-      console.warn('[UsageIntel] collector.py not found at:', collector);
+    if (!electron || !electron.ipcRenderer) {
+      console.warn('[UsageIntel] electron.ipcRenderer not available in renderer.');
       return;
     }
 
     isFetching = true;
-    const pythonBin = getPythonBin();
-
     try {
-      if (!cp || typeof cp.execFile !== 'function') {
-        isFetching = false;
-        return;
+      const res = await electron.ipcRenderer.invoke('usage:get-stats', { forceRefresh: !!forceRefresh });
+      if (res && res.success && res.data) {
+        cachedStats = res.data;
+        updateBadgeSummary(cachedStats);
+        if (callback) callback(cachedStats);
+        if (modalVisible) renderModalContent(cachedStats);
+      } else {
+        console.warn('[UsageIntel] Failed to get stats from IPC:', res ? res.error : 'Unknown response');
+        if (modalVisible) renderErrorContent(res ? res.error : '无法获取统计数据');
       }
-      cp.execFile(pythonBin, [collector, '--json'], { maxBuffer: 15 * 1024 * 1024, timeout: 20000 }, (err, stdout) => {
-        isFetching = false;
-        if (err) {
-          console.error('[UsageIntel] Collector error:', err);
-          return;
-        }
-        try {
-          cachedStats = JSON.parse(stdout.trim());
-          if (callback) callback(cachedStats);
-          if (modalVisible) renderModalContent(cachedStats);
-        } catch (e) {
-          console.error('[UsageIntel] Failed to parse JSON:', e);
-        }
-      });
     } catch (err) {
+      console.error('[UsageIntel] IPC call exception:', err);
+      if (modalVisible) renderErrorContent(err.message);
+    } finally {
       isFetching = false;
-      console.error('[UsageIntel] Failed to run collector:', err);
     }
+  }
+
+  // 通过主进程 IPC 打开独立网页大屏看板
+  async function openBrowserDashboard() {
+    try {
+      if (electron && electron.ipcRenderer) {
+        await electron.ipcRenderer.invoke('usage:open-dashboard');
+      }
+    } catch (err) {
+      console.error('[UsageIntel] Failed to open browser dashboard:', err);
+    }
+  }
+
+  // 更新徽标上的微标签与提示文案
+  function updateBadgeSummary(data) {
+    try {
+      const badge = document.getElementById('ag-usage-intelligence-badge');
+      if (!badge || !data) return;
+
+      const total = (data.summary && data.summary.total_tokens) || 0;
+      const formatted = formatNum(total);
+
+      let tag = document.getElementById('ag-usage-intel-tag');
+      if (!tag) {
+        tag = document.createElement('span');
+        tag.id = 'ag-usage-intel-tag';
+        Object.assign(tag.style, {
+          marginLeft: '4px',
+          fontSize: '10px',
+          fontWeight: '600',
+          padding: '1px 5px',
+          borderRadius: '8px',
+          background: 'rgba(56, 189, 248, 0.22)',
+          color: '#bae6fd',
+          lineHeight: '1.2'
+        });
+        badge.appendChild(tag);
+      }
+      tag.textContent = formatted;
+
+      const s = data.summary || {};
+      const st = data.streaks || {};
+      badge.title = `Antigravity 用量与配额智脑\n● 总用量: ${formatNum(s.total_tokens || 0)} Tokens (Prompt 缓存节省: ${s.cache_hit_rate_pct || 0}%)\n● 连续活跃: ${st.current_streak || 0} 天 · 累计活跃: ${st.active_days || 0} 天\n● 会话总计: ${s.total_sessions || 0} 个 · 对话轮次: ${s.total_turns || 0} 轮\n● 工具可靠率: ${s.tool_success_rate_pct || 97}%\n\n【点击打开】查看多维度交互智脑看板`;
+    } catch (e) {}
   }
 
   // 注入底部工具栏徽章与事件绑定
@@ -135,13 +144,18 @@
           e.stopPropagation();
           openModal();
         });
+        contextBadge.style.cursor = 'pointer';
         contextBadge.title = (contextBadge.title || '') + '\n\n【点击打开】Antigravity 用量与配额智脑看板';
       }
 
       // 2. 检查并注入独立的「用量智脑」徽标
       const existingBadge = document.getElementById('ag-usage-intelligence-badge');
-      if (existingBadge && document.body.contains(existingBadge)) return;
+      if (existingBadge && document.body.contains(existingBadge)) {
+        if (cachedStats) updateBadgeSummary(cachedStats);
+        return;
+      }
 
+      // 挂载点首选在 contextBadge 后面，其次在 modelBtn 后面
       const mountTarget = contextBadge || modelBtn;
       if (!mountTarget || !mountTarget.parentElement) return;
 
@@ -199,6 +213,7 @@
       });
 
       mountTarget.insertAdjacentElement('afterend', badge);
+      if (cachedStats) updateBadgeSummary(cachedStats);
     } catch (e) {
       console.error('[UsageIntel] Badge injection error:', e);
     }
@@ -208,11 +223,15 @@
   function openModal() {
     createOrShowModal();
     modalVisible = true;
+    if (cachedStats) {
+      renderModalContent(cachedStats);
+    }
     fetchStats(false, (data) => {
       renderModalContent(data);
     });
   }
 
+  // 关闭弹窗模态框
   function closeModal() {
     const modal = document.getElementById('ag-ui-modal-overlay');
     if (modal) {
@@ -225,7 +244,7 @@
     }
   }
 
-  // 创建模态框容器
+  // 创建或显示模态框
   function createOrShowModal() {
     let overlay = document.getElementById('ag-ui-modal-overlay');
     if (!overlay) {
@@ -237,7 +256,7 @@
         left: '0',
         width: '100vw',
         height: '100vh',
-        backgroundColor: 'rgba(5, 8, 16, 0.72)',
+        backgroundColor: 'rgba(5, 8, 16, 0.75)',
         backdropFilter: 'blur(10px)',
         zIndex: '999999',
         display: 'flex',
@@ -261,21 +280,21 @@
       const dialog = document.createElement('div');
       dialog.id = 'ag-ui-modal-dialog';
       Object.assign(dialog.style, {
-        width: '880px',
+        width: '900px',
         maxWidth: '92vw',
-        maxHeight: '86vh',
+        maxHeight: '88vh',
         backgroundColor: '#0f172a',
         borderRadius: '16px',
         border: '1px solid rgba(255, 255, 255, 0.12)',
-        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.6), 0 0 35px rgba(56, 189, 248, 0.12)',
+        boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.7), 0 0 35px rgba(56, 189, 248, 0.15)',
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden'
       });
 
       dialog.innerHTML = `
-        <!-- 头部 -->
-        <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: space-between; background: rgba(30, 41, 59, 0.5);">
+        <!-- 头部导航与操作 -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: space-between; background: rgba(30, 41, 59, 0.6);">
           <div style="display: flex; align-items: center; gap: 10px;">
             <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(56, 189, 248, 0.15); border: 1px solid rgba(56, 189, 248, 0.3); display: flex; align-items: center; justify-content: center; font-size: 16px;">📊</div>
             <div>
@@ -283,15 +302,15 @@
                 <span style="font-size: 15px; font-weight: 600; color: #f8fafc; letter-spacing: -0.2px;">Antigravity 用量与配额智脑</span>
                 <span style="font-size: 10px; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); padding: 1px 6px; border-radius: 10px; font-weight: 500;">● 本地实时</span>
               </div>
-              <div style="font-size: 11px; color: #94a3b8; margin-top: 1px;">100% 本地分析 · 实时模型推理与 Prompt 缓存监控</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 1px;">100% 离线隐私分析 · 实时模型推理与 Prompt 缓存监控</div>
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button id="ag-ui-btn-browser" style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; font-size: 12px; padding: 5px 11px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.2s;">
+            <button id="ag-ui-btn-browser" style="background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.35); color: #38bdf8; font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.2s; font-weight: 500;">
               <span>🌐</span> 浏览器大屏
             </button>
-            <button id="ag-ui-btn-refresh" style="background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.1); color: #e2e8f0; font-size: 12px; padding: 5px 11px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.2s;">
-              <span>🔄</span> 刷新
+            <button id="ag-ui-btn-refresh" style="background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); color: #e2e8f0; font-size: 12px; padding: 6px 12px; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 4px; transition: background 0.2s; font-weight: 500;">
+              <span id="ag-ui-refresh-icon">🔄</span> 刷新
             </button>
             <button id="ag-ui-btn-close" style="background: transparent; border: none; color: #94a3b8; font-size: 18px; width: 28px; height: 28px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: all 0.2s;">✕</button>
           </div>
@@ -300,8 +319,8 @@
         <!-- 内容区域 -->
         <div id="ag-ui-modal-body" style="padding: 20px; overflow-y: auto; flex: 1;">
           <div style="text-align: center; padding: 40px 0; color: #94a3b8; font-size: 13px;">
-            <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; animation: ag-spin 0.8s linear infinite; margin-bottom: 10px;"></div>
-            <div>正在采集 Antigravity 交互日志与配额数据...</div>
+            <div style="display: inline-block; width: 22px; height: 22px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; animation: ag-spin 0.8s linear infinite; margin-bottom: 12px;"></div>
+            <div>正在深度聚合 Antigravity 交互日志与配额数据...</div>
           </div>
         </div>
       `;
@@ -311,23 +330,20 @@
 
       // 绑定头部按钮事件
       document.getElementById('ag-ui-btn-close').onclick = closeModal;
+
       document.getElementById('ag-ui-btn-refresh').onclick = () => {
-        const body = document.getElementById('ag-ui-modal-body');
-        if (body) {
-          body.innerHTML = `
-            <div style="text-align: center; padding: 40px 0; color: #94a3b8; font-size: 13px;">
-              <div style="display: inline-block; width: 20px; height: 20px; border: 2px solid #38bdf8; border-top-color: transparent; border-radius: 50%; animation: ag-spin 0.8s linear infinite; margin-bottom: 10px;"></div>
-              <div>正在刷新数据...</div>
-            </div>`;
-        }
-        fetchStats(true, (data) => renderModalContent(data));
+        const icon = document.getElementById('ag-ui-refresh-icon');
+        if (icon) icon.style.display = 'inline-block';
+        if (icon) icon.style.animation = 'ag-spin 0.8s linear infinite';
+
+        fetchStats(true, (data) => {
+          if (icon) icon.style.animation = 'none';
+          renderModalContent(data);
+        });
       };
 
       document.getElementById('ag-ui-btn-browser').onclick = () => {
-        const { dashboardHtml } = getPaths();
-        if (dashboardHtml && cp) {
-          cp.exec(`start "" "${dashboardHtml}"`);
-        }
+        openBrowserDashboard();
       };
 
       // 注入旋转动画
@@ -341,6 +357,19 @@
       overlay.style.opacity = '1';
       overlay.style.pointerEvents = 'auto';
     });
+  }
+
+  // 渲染错误提示
+  function renderErrorContent(msg) {
+    const body = document.getElementById('ag-ui-modal-body');
+    if (!body) return;
+    body.innerHTML = `
+      <div style="text-align: center; padding: 40px 20px; color: #f87171;">
+        <div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>
+        <div style="font-size: 15px; font-weight: 600; color: #fca5a5; margin-bottom: 6px;">用量数据采集受阻</div>
+        <div style="font-size: 12px; color: #94a3b8; max-width: 500px; margin: 0 auto; line-height: 1.6;">${msg || '未知错误，请检查后台 Python 环境或重新启动 Antigravity。'}</div>
+      </div>
+    `;
   }
 
   // 渲染弹窗内部核心数据
@@ -383,11 +412,11 @@
         <div style="background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 14px;">
           <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">🧠 思考与输出 Tokens</div>
           <div style="font-size: 20px; font-weight: 700; color: #a855f7;">${formatNum(outputTokens)}</div>
-          <div style="font-size: 10px; color: #64748b; margin-top: 4px;">思考 Tokens: ${formatNum(thinkingTokens)} (${thinkingPct}%)</div>
+          <div style="font-size: 10px; color: #64748b; margin-top: 4px;">思考: ${formatNum(thinkingTokens)} (${thinkingPct}%)</div>
         </div>
 
         <div style="background: rgba(255, 255, 255, 0.035); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px; padding: 14px;">
-          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">🎯 活跃打卡与会话</div>
+          <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px;">🎯 活跃打卡与连击</div>
           <div style="font-size: 20px; font-weight: 700; color: #f59e0b;">${st.current_streak || 0} 天连击</div>
           <div style="font-size: 10px; color: #64748b; margin-top: 4px;">${s.total_sessions || 0} 次会话 · ${s.total_turns || 0} 轮对话</div>
         </div>
@@ -481,7 +510,7 @@
             ${s.tool_success_rate_pct || 97.0}% 可靠率
           </div>
           <div style="font-size: 11px; color: #94a3b8;">
-            累计执行 ${s.total_tool_calls || 0} 次工具调用 · 发生 ${s.total_tool_errors || 0} 次重试与纠错
+            累计执行 ${s.total_tool_calls || 0} 次工具调用 · 发生 ${s.total_tool_errors || 0} 次纠错重试
           </div>
           <div style="margin-top: 10px; font-size: 11px; color: #64748b;">
             主力工具: run_command · write_to_file · view_file · manage_task
@@ -497,8 +526,8 @@
   setInterval(ensureBadgeInDOM, 1000);
   ensureBadgeInDOM();
 
-  // 延时预拉取一次数据
-  setTimeout(() => fetchStats(false), 1200);
+  // 初始预拉取统计数据
+  setTimeout(() => fetchStats(false), 1000);
 
   console.log('[UsageIntel] Antigravity Usage Intelligence plugin loaded successfully.');
 })();

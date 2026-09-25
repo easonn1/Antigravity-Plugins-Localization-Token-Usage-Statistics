@@ -1,8 +1,15 @@
+# -*- coding: utf-8 -*-
 """
 Antigravity Usage Intelligence - Core Telemetry Collector & Engine
+--------------------------------------------------------------------------
+Original Project : https://github.com/Nir-Bhay/antigravity-usage-intelligence
+Original Author  : Nirbhay Hiwse (https://github.com/Nir-Bhay)
+License          : MIT License
+Ported & Adapted : Adapted for Antigravity Desktop Client & fully localized
+                   by easonn1 (https://github.com/easonn1)
+--------------------------------------------------------------------------
 Extracts exact token metrics from Antigravity's internal SQLite conversation databases.
 """
-
 import sys
 import os
 import re

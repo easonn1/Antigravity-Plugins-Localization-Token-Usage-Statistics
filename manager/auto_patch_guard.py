@@ -40,15 +40,31 @@ _last_patch_time = 0
 _PATCH_COOLDOWN = 30  # 30 秒内不重复修复
 
 
+PLUGINS_DIR = HOME / '.gemini' / 'antigravity' / 'plugins'
+
+
 def is_patched():
-    """检查 preload.js 是否包含我们的插件标记"""
+    """检查 preload.js 是否包含我们的插件标记，并检查插件源文件是否有新改动"""
     if not PRELOAD_PATH.exists():
         return False
     try:
         code = PRELOAD_PATH.read_text(encoding='utf-8')
         has_localization = 'processNode' in code and 'MutationObserver' in code
         has_token = 'ag-token-counter-badge' in code
-        return has_localization and has_token
+        if not (has_localization and has_token):
+            return False
+
+        # 如果插件源码比 preload.js 还要新，说明有新修改尚未打包注入
+        preload_mtime = PRELOAD_PATH.stat().st_mtime
+        p1 = PLUGINS_DIR / '01-chinese-localization.js'
+        p2 = PLUGINS_DIR / '02-context-token-counter.js'
+        if p1.exists() and p1.stat().st_mtime > preload_mtime:
+            log.info('Detected updated 01-chinese-localization.js, repatch required.')
+            return False
+        if p2.exists() and p2.stat().st_mtime > preload_mtime:
+            log.info('Detected updated 02-context-token-counter.js, repatch required.')
+            return False
+        return True
     except Exception:
         return False
 

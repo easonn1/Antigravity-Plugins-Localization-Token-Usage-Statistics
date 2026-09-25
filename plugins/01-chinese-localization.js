@@ -1,6 +1,49 @@
 // Antigravity Chinese Localization Engine
 (function() {
   const dictionary = {
+    // === 补充：账户验证、会话过期与状态提醒气泡 ===
+    "Verification required": "需要进行身份验证",
+    "Verification Required": "需要进行身份验证",
+    "Authentication required": "需要身份验证",
+    "Authentication Required": "需要身份验证",
+    "Account verification required": "需要验证账户",
+    "Account Verification Required": "需要验证账户",
+    "Action required": "需要操作",
+    "Action Required": "需要操作",
+    "Please verify your account to continue using Antigravity.": "请验证您的账户以继续使用 Antigravity。",
+    "Please verify your account to continue using Antigravity": "请验证您的账户以继续使用 Antigravity",
+    "Please verify your account to continue.": "请验证您的账户以继续。",
+    "Please verify your account to continue": "请验证您的账户以继续",
+    "Please sign in to continue using Antigravity.": "请登录以继续使用 Antigravity。",
+    "Please sign in to continue using Antigravity": "请登录以继续使用 Antigravity",
+    "Please sign in to continue.": "请登录以继续。",
+    "Please sign in to continue": "请登录以继续",
+    "Your account requires verification to continue using Antigravity.": "您的账户需要完成验证才能继续使用 Antigravity。",
+    "Verify your account to continue using Antigravity.": "验证您的账户以继续使用 Antigravity。",
+    "Complete verification": "完成验证",
+    "Complete Verification": "完成验证",
+    "Verify account": "验证账户",
+    "Verify Account": "验证账户",
+    "Verify now": "立即验证",
+    "Verify Now": "立即验证",
+    "Verify": "验证",
+    "Session expired": "会话已过期",
+    "Session Expired": "会话已过期",
+    "Your session has expired. Please sign in again.": "您的会话已过期，请重新登录。",
+    "Please sign in again to continue.": "请重新登录以继续。",
+    "Account suspended": "账户已被暂停",
+    "Account restricted": "账户受限",
+    "Usage limit reached": "已达到使用限额",
+    "Rate limit reached": "已达到速率限制",
+    "Rate Limit Exceeded": "超出速率限制",
+    "You have reached your request limit.": "您已达到请求限额。",
+    "Upgrade to continue using Antigravity.": "升级以继续使用 Antigravity。",
+    "Upgrade to Pro": "升级到 Pro",
+    "Upgrade to Ultra": "升级到 Ultra",
+    "Upgrade plan": "升级计划",
+    "Upgrade Plan": "升级计划",
+    "Remind me later": "稍后提醒我",
+
     // === 命令面板（Fastpick）与快捷指令全量汉化 ===
     "Search for commands...": "搜索命令...",
     "Search for commands": "搜索命令",
@@ -566,6 +609,24 @@
     
     // Dynamic Regex Translations
     // 针对设置与权限的动态正则替换
+    // 账户验证与通知弹窗动态替换（全面匹配各种大小写与嵌套结构）
+    if (text.indexOf("verify") !== -1 || text.indexOf("Verification") !== -1 || text.indexOf("verification") !== -1) {
+      text = text.replace(/Verification required/gi, "需要进行验证");
+      text = text.replace(/Complete verification/gi, "完成验证");
+      text = text.replace(/Please verify your account to continue using Antigravity\.?\s*/gi, "请验证您的账户以继续使用 Antigravity。");
+      text = text.replace(/Please verify your account to continue\.?\s*/gi, "请验证您的账户以继续。");
+      text = text.replace(/Verify your account to continue using Antigravity\.?\s*/gi, "验证您的账户以继续使用 Antigravity。");
+      text = text.replace(/Verify your account to continue\.?\s*/gi, "验证您的账户以继续。");
+      text = text.replace(/Verify your account/gi, "验证您的账户");
+      text = text.replace(/Verify account/gi, "验证账户");
+    }
+    if (/^Complete verification$/i.test(trimmed)) {
+      return text.replace(trimmed, "完成验证");
+    }
+    if (/^Verification required$/i.test(trimmed)) {
+      return text.replace(trimmed, "需要进行验证");
+    }
+
     // 浏览器设置迁移提示动态替换
     if (text.indexOf("Browser settings have moved") !== -1) {
       text = text.replace(/Browser settings have moved to the Browser section of General settings\.?/gi, "浏览器设置已移至常规设置中的“浏览器”部分。");

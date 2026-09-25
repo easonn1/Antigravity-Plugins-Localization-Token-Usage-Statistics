@@ -13,7 +13,8 @@ temp_asar/
 
 # Analytics data & sensitive caches
 antigravity_stats_cache.json
-dashboard.html
+*.tmp.html
+antigravity_dashboard.html
 
 # OS & Editor
 .DS_Store

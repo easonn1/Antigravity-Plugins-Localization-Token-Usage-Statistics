@@ -1,82 +1,150 @@
 # ⚡ Antigravity 插件增强套件 (Antigravity Plugins Suite)
+### 深度中文汉化 · 上下文 Token 实时统计 · 用量智脑大盘分析
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows-0078D6.svg)](#)
-[![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3776AB.svg)](#)
+[![Python: 3.8+](https://img.shields.io/badge/Python-3.8+-3776AB.svg)](#)
 [![Node.js: 18+](https://img.shields.io/badge/Node.js-18+-339933.svg)](#)
+[![Antigravity: Supported](https://img.shields.io/badge/Antigravity-Latest-4285F4.svg)](#)
 
-专为 **Google Antigravity** 打造的深度汉化、上下文 Token 实时统计徽标及插件化拓展套件。
-
----
-
-## 🌟 核心特性
-
-- 🌐 **深度中文汉化 (Chinese Localization)**
-  - 全面覆盖菜单栏、设置面板、快捷键一览、快捷命令面板（Fastpick）、智能体交互提示等。
-  - 智能修复命令面板“命令”按钮竖排折行问题，完美恢复横排优雅展示。
-  - 动态监听 DOM 变化，异步加载内容秒级自适应翻译。
-- 📊 **上下文 Token 实时统计徽标 (Context Token Counter)**
-  - 位于输入框右下角，清晰显示当前对话 Token 实际消耗量与上限模型比例（如 `上下文: 156.9k / 1.0M`）。
-  - 双重同步架构：支持底层真实日志逐行高精度统计 + CDP WebSocket 秒级热推。
-  - 点击徽章可一键复制当前活跃日志绝对路径，便于回溯调试。
-- 🛡️ **双重防丢与守护机制 (Smart Patch & Guard)**
-  - 自动备份官方原版 `app.asar.bak`。
-  - 内置无感后台守护引擎（`auto_patch_guard.py`），实时监听官方版本更新并自动平滑补丁，绝不损坏原版文件。
-  - 全流程系统调用启用隐藏窗体，0 弹框、0 闪退、100% 纯静默。
-- 🧩 **高度模块化与热插拔 (Modular Extensible)**
-  - 支持放入自定义 `.js` 脚本即可热加载第三方插件。
+专为 **Google Antigravity** 桌面客户端打造的一站式终极增强套件。只需双击运行一键安装，即可同时激活 **全局深度中文汉化**、**上下文 Token 实时显示** 以及 **Token 用量智脑大盘统计** 三大核心模块！
 
 ---
 
-## 📁 目录结构
+## 🌟 三大核心功能
+
+### 1. 🌐 全局深度中文汉化 (Chinese Localization)
+- **100% 覆盖**：覆盖 Antigravity 客户端菜单栏、设置面板、侧边栏、快捷键一览、智能体对话提示等。
+- **命令面板排版修复 (Fastpick)**：针对官方快捷命令面板（Fastpick）存在的样式换行 Bug 进行了修复，解决“命令”二字竖排折行错位问题，恢复优雅平整的横向排版，并翻译了 60+ 项内置快捷命令。
+- **智能动态监听**：基于 DOM Mutation 深度优化，动态加载的新建会话、对话流、工具卡片均实现毫秒级自适应翻译。
+
+### 2. ⚡ 上下文 Token 实时显示与进度条 (Context Token Counter)
+- **常驻输入框底部**：清晰直观呈现当前会话的上下文 Token 消耗量与模型最大窗口比例（如 `● 上下文: 15.8k / 1.0M (1.6%)`）。
+- **实时热推送 (CDP 引擎)**：后台静默守护进程毫秒级监听底层数据库日志，一旦有新内容生成立即通过 DevTools 协议热推到界面，无需手动刷新。
+- **便捷回溯**：点击徽章即可一键复制当前会话的底层日志绝对路径，排查问题更高效。
+
+### 3. 📊 Token 用量智脑大盘分析 (Usage Intelligence)
+- **客户端内原生徽章**：输入框旁常驻 `📊用量智脑` 快捷按钮，点击即可呼出暗黑毛玻璃悬浮看板。
+- **7 大关键指标卡 (KPI)**：总 Token 处理量、输入/输出 Token 分布、Prompt 上下文缓存命中量、缓存节省率、深度思考 Reasoning Token 用量、工具调用总次数与成功率。
+- **丰富的数据可视化**：
+  - **每日消耗趋势柱状图**：按输入、缓存复用、生成输出、思考推理 4 色堆叠展示。
+  - **24 小时活跃作息分布图**：直观展示您与智能体协作的高峰时段分布。
+  - **前沿模型份额占比**：Claude Opus、Claude Sonnet、Gemini 3.8/3.7 Flash 等多模型配额与思考 Token 消耗占比。
+  - **智能体活跃打卡热力图**：GitHub 风格的年度打卡点阵图，记录连续编码天数与历史最高连击。
+- **独立浏览器完整大屏**：一键在 Chrome/Edge 浏览器中打开全屏沉浸式仪表盘（`dashboard.html`），支持按今日/昨日/近7天/近30天/全部历史筛选，支持一键复制 Markdown 周报、导出 CSV 表格或 JSON 报表。
+
+---
+
+## 🚀 一键全量部署（极简安装，绝不出错）
+
+本套件经过严格的跨平台与环境适配测试，提供全自动化的防呆安装器，零命令行门槛。
+
+### 📋 前置要求
+1. **Windows 10 / 11** 操作系统
+2. 已安装 [Node.js](https://nodejs.org/) (推荐 LTS 18 或 20+)
+3. 已安装 [Python](https://www.python.org/) 3.8+ (安装时请务必勾选 `Add Python to PATH`)
+
+### ⚡ 部署步骤
+1. **下载或克隆本仓库**：
+   ```bash
+   git clone https://github.com/easonn1/Antigravity-Plugins-Localization-Token-Usage-Statistics.git
+   ```
+2. **一键全量安装**：
+   - 直接双击仓库根目录下的 **`一键全量部署(汉化+Token+用量大盘).bat`**（或执行 `install.bat`）。
+3. **全自动执行流 (7步闭环)**：
+   - `[1/7]` 自动检测 Node.js、Python 及 Antigravity 安装路径；
+   - `[2/7]` 自动安全关闭正在运行的 Antigravity 客户端（防止文件占用锁死）；
+   - `[3/7]` 自动创建官方原版备份（`app.asar.bak`），保障随时可一秒完整回退；
+   - `[4/7]` 自动部署三大插件核心与管理引擎至用户系统目录；
+   - `[5/7]` 调用底层 Pure ASAR 补丁引擎完成代码注入与 4 字节 Header 严格对齐重打包；
+   - `[6/7]` 首次自动运行数据采集器，初始化专属于您的本地真实看板数据；
+   - `[7/7]` 安装 Windows 开机静默防失效守护（全流程 0 控制台黑框弹窗），并启动 Antigravity！
+
+---
+
+## 🛠️ 管理与卸载
+
+| 快捷入口 | 功能说明 |
+| :--- | :--- |
+| **`一键全量部署(汉化+Token+用量大盘).bat`** | 一键自动完成三大功能全量安装、打补丁与自启守护配置 |
+| **`启动插件管理中心.bat`** | 打开可视化管理窗口 (Tkinter)，自由启用/禁用各插件 |
+| **`一键恢复官方原版.bat`** | 一键从官方备份 (`app.asar.bak`) 秒级还原，完全卸载补丁与自启 |
+| **`install.bat` / `uninstall.bat`** | 命令行英文别名快捷入口，便于脚本批量调用 |
+
+---
+
+## 📁 仓库文件结构
 
 ```text
-antigravity-plugins/
-├── 启动插件管理中心.bat            # 图形化管理面板入口
-├── 一键安全注入(内存生效).bat       # 纯内存 CDP 注入（软件已在运行时推荐）
-├── 智能启动与汉化.bat              # 后台静默启动软件并自动注入
-├── 一键恢复官方原版.bat             # 一秒回退为官方纯净版
-├── Antigravity-Plugin-Manager.py  # 图形化管理工具 (Tkinter)
-├── plugins/
-│   ├── 01-chinese-localization.js # 深度汉化插件核心
-│   ├── 02-context-token-counter.js# 上下文 Token 实时统计插件
-│   ├── 03-usage-intelligence.js   # 用量智脑大盘插件
-│   ├── collector.py               # 本地用量遥测采集器
-│   ├── plugins.json               # 插件列表与启用配置
-│   └── _template-plugin.js        # 插件开发参考模板
-└── manager/
-    ├── patch_engine.js            # Node 注入与打包引擎 (含原生菜单与 asar 重打包)
-    ├── auto_patch_guard.py        # 后台守护进程 (防更新失效 + CDP 实时推送)
-    └── AntigravityPluginGuard.vbs # 开机静默后台常驻脚本
+Antigravity-Plugins-Localization-Token-Usage-Statistics/
+├── 一键全量部署(汉化+Token+用量大盘).bat    # ★ 推荐：一键安装全部功能
+├── 启动插件管理中心.bat                   # 可视化插件开关与管理控制台
+├── 一键恢复官方原版.bat                   # ★ 秒级无损还原官方原生版本
+├── install.bat                          # 英文别名一键安装脚本
+├── uninstall.bat                        # 英文别名一键卸载脚本
+├── Antigravity-Plugin-Manager.py         # 图形化插件管理器源码 (GUI)
+├── plugins/                             # 三大插件核心包
+│   ├── 01-chinese-localization.js       # 核心 1：深度中文汉化与 Fastpick 横排排版
+│   ├── 02-context-token-counter.js      # 核心 2：上下文 Token 实时显示与进度条
+│   ├── 03-usage-intelligence.js         # 核心 3：用量智脑悬浮看板与大屏前端
+│   ├── collector.py                     # 本地会话数据库高精度遥测采集引擎
+│   ├── dashboard.html                   # 独立沉浸式 Web 仪表盘模板 (全中文)
+│   ├── plugins.json                     # 插件注册与配置表
+│   └── _template-plugin.js              # 自定义插件开发模板
+└── manager/                             # 底层补丁与防更新守护系统
+    ├── install.py                       # 高稳定性自动化部署核心驱动
+    ├── uninstall.py                     # 安全回退与反安装核心驱动
+    ├── patch_engine.js                  # Pure ASAR 打包与底层 IPC 挂载引擎
+    ├── auto_patch_guard.py              # 后台静默守护进程 (防更新失效 + CDP 实时推送)
+    └── AntigravityPluginGuard.vbs       # 开机静默启动引导 (0 黑框)
 ```
 
 ---
 
-## 🚀 快速上手
+## 🤝 开源致敬与来源说明 (Attribution & Credits)
 
-### 方式 1：软件已打开时，一键注入（最推荐，零风险）
-在 Antigravity 正在运行时，双击运行 **`一键安全注入(内存生效).bat`** 即可！
-- 采用 **Chrome DevTools Protocol (CDP)** 内存级安全注入。
-- 零修改磁盘文件，无需重启软件，窗口瞬间生效。
+本项目中的 **Token 用量智脑大盘 (Usage Intelligence)** 模块，其数据遥测理念与大屏可视化设计源自优秀的开源项目：
 
-### 方式 2：图形化插件管理面板
-双击运行 **`启动插件管理中心.bat`**：
-- 可视化勾选或禁用任一插件；
-- 支持一键注入、一键启动、一键打补丁、以及打开插件目录放入新插件。
+- 📌 **原始项目**：[antigravity-usage-intelligence](https://github.com/Nir-Bhay/antigravity-usage-intelligence)
+- 👤 **原始作者**：**Nirbhay Hiwse** ([@Nir-Bhay](https://github.com/Nir-Bhay))
+- 📜 **开源协议**：[MIT License](https://github.com/Nir-Bhay/antigravity-usage-intelligence/blob/main/LICENSE)
 
-### 方式 3：永久内嵌与自动守护（官方更新不失效）
-1. 双击运行 `manager/patch_engine.js` 或通过管理中心点击【深度打入补丁】；
-2. 将 `manager/AntigravityPluginGuard.vbs` 快捷方式放入 Windows 开机自启文件夹（`shell:startup`），即可实现开机全静默自动守护。
+### 本项目所做的深度二次研发与原生适配：
+1. **脱离 VS Code 限制，原生嵌入 Electron 桌面端**：
+   原始项目为 VS Code 扩展（`.vsix`）。本项目通过逆向工程将其核心遥测算法与前端面板重构为 Antigravity Electron 桌面客户端的原生内置插件（`03-usage-intelligence.js`），支持在主界面输入框旁一键呼出悬浮弹窗与全屏大屏，零 VS Code 外部依赖。
+2. **100% 深度中文本地化**：
+   将全部 7 大 KPI 指标、每日趋势堆叠图、作息分布、模型配额与打卡热力图等所有英文文本、图例、Tooltip 进行全面中文润色与本地化适配。
+3. **攻克 Chromium 严格沙盒与 Pure ASAR Header 打包**：
+   解决了 Electron 沙盒环境下原生模块拦截问题，通过主进程 IPC 异步解耦，并自研了 4 字节严格对齐的 Pure ASAR 归档引擎，杜绝重打包语法报错与客户端崩溃风险。
 
----
-
-## 🛠️ 一键卸载与安全回退
-
-若需要恢复官方纯净状态：
-- 双击运行 **`一键恢复官方原版.bat`**，即可一键替换还原为官方纯净版 `app.asar`，干净彻底。
+特此向原作者 **Nirbhay Hiwse** 的开创性工作致以崇高的敬意与感谢！
 
 ---
 
-## 📄 开源许可
+## ❓ 常见问题 (FAQ)
 
-本项目基于 [MIT License](LICENSE) 开源发布。
+<details>
+<summary><b>Q1: 软件更新后，汉化和 Token 统计会不会失效？</b></summary>
+
+**完全不用担心！**
+安装程序已将开机守护脚本（`AntigravityPluginGuard.vbs`）部署至系统自启项中。在后台，守护引擎会静默监控 Antigravity 版本文件变动。一旦官方发生自动覆盖更新，守护引擎会在后台自动重新打入增强补丁，全程全静默无感，无需用户再次手动重装。
+</details>
+
+<details>
+<summary><b>Q2: 运行过程中会不会时不时跳出黑色 CMD 命令行黑框？</b></summary>
+
+**绝对不会！**
+本项目的所有子进程调用（包含 Node 打包、Python 数据采集、守护轮询）均显式声明了 `CREATE_NO_WINDOW` 与 `windowsHide: true`，开机通过轻量 VBS 脚本隐蔽引导，实现 100% 纯净无黑框运行。
+</details>
+
+<details>
+<summary><b>Q3: 如果我想彻底恢复官方原版，该怎么操作？</b></summary>
+
+直接双击运行 **`一键恢复官方原版.bat`** 即可。安装时系统会自动创建官方原版的 `app.asar.bak`。恢复工具会一秒将官方备份完整替换回位，并清理自启动项，不残留任何修改。
+</details>
+
+---
+
+## 📄 开源许可证
+
+本项目基于 [MIT License](LICENSE) 许可证开源发布。

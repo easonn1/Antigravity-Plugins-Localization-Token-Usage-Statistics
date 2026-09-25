@@ -81,6 +81,84 @@ function extractAsarPure(asarPath, destDir) {
   fs.closeSync(fd);
 }
 
+function packAsarPure(srcDir, destFile) {
+  const fileList = [];
+  
+  function walkDir(dir, relPath) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    const node = {};
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      const subRel = relPath ? `${relPath}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        node[entry.name] = { files: walkDir(fullPath, subRel) };
+      } else if (entry.isFile()) {
+        const stat = fs.statSync(fullPath);
+        fileList.push({ fullPath, size: stat.size });
+        node[entry.name] = { size: stat.size, offset: '0' };
+      }
+    }
+    return node;
+  }
+
+  const rootFiles = walkDir(srcDir, '');
+  
+  let curOffset = 0;
+  function updateOffsets(node) {
+    for (const key of Object.keys(node)) {
+      const item = node[key];
+      if (item.files) {
+        updateOffsets(item.files);
+      } else if (item.size !== undefined) {
+        item.offset = String(curOffset);
+        curOffset += item.size;
+      }
+    }
+  }
+  updateOffsets(rootFiles);
+
+  const headerObj = { files: rootFiles };
+  let headerJson = JSON.stringify(headerObj);
+  
+  // Ensure header JSON byte length is strictly a multiple of 4
+  let headerBuf = Buffer.from(headerJson, 'utf8');
+  const remainder = headerBuf.length % 4;
+  if (remainder !== 0) {
+    const padCount = 4 - remainder;
+    headerObj.__pad = ' '.repeat(padCount > 10 ? padCount : padCount + 4);
+    headerJson = JSON.stringify(headerObj);
+    headerBuf = Buffer.from(headerJson, 'utf8');
+    const rem2 = headerBuf.length % 4;
+    if (rem2 !== 0) {
+      headerObj.__pad = ' '.repeat(headerObj.__pad.length + 4 - rem2);
+      headerJson = JSON.stringify(headerObj);
+      headerBuf = Buffer.from(headerJson, 'utf8');
+    }
+  }
+
+  const headerSize = headerBuf.length;
+  const header16 = Buffer.alloc(16);
+  header16.writeUInt32LE(4, 0);
+  header16.writeUInt32LE(headerSize + 8, 4);
+  header16.writeUInt32LE(headerSize + 4, 8);
+  header16.writeUInt32LE(headerSize, 12);
+
+  const outFd = fs.openSync(destFile, 'w');
+  fs.writeSync(outFd, header16);
+  fs.writeSync(outFd, headerBuf);
+
+  const copyBuf = Buffer.alloc(1024 * 1024);
+  for (const f of fileList) {
+    const inFd = fs.openSync(f.fullPath, 'r');
+    let bytesRead = 0;
+    while ((bytesRead = fs.readSync(inFd, copyBuf, 0, copyBuf.length, null)) > 0) {
+      fs.writeSync(outFd, copyBuf, 0, bytesRead);
+    }
+    fs.closeSync(inFd);
+  }
+  fs.closeSync(outFd);
+}
+
 function applyPatch() {
   log('Starting patch process...');
   if (!fs.existsSync(RESOURCES_DIR)) {
@@ -126,19 +204,25 @@ function applyPatch() {
   extractAsarPure(srcAsar, EXTRACT_DIR);
   log('Extract complete.');
 
-  // 4.1 Inject IPC Handlers for token:get-count in ipcHandlers.js
+  // 4.1 Inject IPC Handlers for token:get-count & usage:get-stats in ipcHandlers.js
   const ipcPath = path.join(EXTRACT_DIR, 'dist', 'ipcHandlers.js');
   if (fs.existsSync(ipcPath)) {
     let ipcCode = fs.readFileSync(ipcPath, 'utf8');
-    if (!ipcCode.includes("token:get-count")) {
-      const cacheDef = "\n    let tokenCache = { uuid: null, mtime: 0, count: 0, file: null };\n";
+    
+    // Check if token:get-count already defined
+    const hasToken = ipcCode.includes("token:get-count");
+    const hasUsage = ipcCode.includes("usage:get-stats");
+    
+    if (!hasToken || !hasUsage) {
+      const cacheDef = "\n    let tokenCache = { uuid: null, mtime: 0, count: 0, file: null };\n    let usageStatsCache = { data: null, time: 0 };\n";
       const targetFn = "function registerIpcHandlers(storageManager) {";
-      if (ipcCode.includes(targetFn)) {
+      if (!ipcCode.includes("let tokenCache =") && ipcCode.includes(targetFn)) {
         ipcCode = ipcCode.replace(targetFn, targetFn + cacheDef, 1);
       }
-      const lastBrace = ipcCode.lastIndexOf("}");
-      if (lastBrace !== -1) {
-        const handlerCode = `
+      
+      let newHandlers = '';
+      if (!hasToken) {
+        newHandlers += `
     // Custom Token counter handler
     electron_1.ipcMain.handle('token:get-count', async (_event, activeUuid) => {
         try {
@@ -246,14 +330,141 @@ function applyPatch() {
         }
     });
 `;
-        ipcCode = ipcCode.substring(0, lastBrace) + handlerCode + '\n}';
+      }
+
+      if (!hasUsage) {
+        newHandlers += `
+    // Usage Intelligence Stats Handlers
+    electron_1.ipcMain.handle('usage:get-stats', async (_event, options) => {
+        try {
+            const forceRefresh = options && options.forceRefresh;
+            const now = Date.now();
+            if (!forceRefresh && typeof usageStatsCache !== 'undefined' && usageStatsCache.data && (now - usageStatsCache.time < 15000)) {
+                return { success: true, data: usageStatsCache.data, cached: true };
+            }
+
+            const fsSync = require('fs');
+            const pathSync = require('path');
+            const osSync = require('os');
+            const cpSync = require('child_process');
+
+            const homeDir = osSync.homedir();
+            const candidatesCollector = [
+                pathSync.join(homeDir, '.gemini', 'antigravity', 'plugins', 'collector.py')
+            ];
+            let collectorPath = null;
+            for (const p of candidatesCollector) {
+                if (fsSync.existsSync(p)) {
+                    collectorPath = p;
+                    break;
+                }
+            }
+            if (!collectorPath) {
+                return { success: false, error: 'collector.py 未在插件目录中找到' };
+            }
+
+            const candidatesPy = [
+                'C:\\\\Program Files\\\\Python312\\\\python.exe',
+                'C:\\\\Program Files\\\\Python311\\\\python.exe',
+                'C:\\\\Program Files\\\\Python310\\\\python.exe',
+                'python',
+                'py'
+            ];
+            let pythonBin = 'python';
+            for (const py of candidatesPy) {
+                try {
+                    if (py.includes('\\\\') && fsSync.existsSync(py)) {
+                        pythonBin = py;
+                        break;
+                    }
+                } catch(e) {}
+            }
+
+            return new Promise((resolve) => {
+                cpSync.execFile(pythonBin, [collectorPath, '--json'], {
+                    maxBuffer: 25 * 1024 * 1024,
+                    timeout: 25000,
+                    windowsHide: true
+                }, (err, stdout, stderr) => {
+                    if (err) {
+                        console.error('[UsageIntel:Main] Collector failed:', err);
+                        if (typeof usageStatsCache !== 'undefined' && usageStatsCache.data) {
+                            return resolve({ success: true, data: usageStatsCache.data, fallback: true, error: err.message });
+                        }
+                        return resolve({ success: false, error: err.message, stderr: stderr });
+                    }
+                    try {
+                        const json = JSON.parse(stdout.trim());
+                        if (typeof usageStatsCache !== 'undefined') {
+                            usageStatsCache = { data: json, time: Date.now() };
+                        }
+                        resolve({ success: true, data: json });
+                    } catch (parseErr) {
+                        console.error('[UsageIntel:Main] JSON parse error:', parseErr);
+                        resolve({ success: false, error: 'JSON parse error: ' + parseErr.message });
+                    }
+                });
+            });
+        } catch (fatalErr) {
+            console.error('[UsageIntel:Main] Exception in usage:get-stats:', fatalErr);
+            return { success: false, error: fatalErr.message };
+        }
+    });
+
+    electron_1.ipcMain.handle('usage:open-dashboard', async () => {
+        try {
+            const fsSync = require('fs');
+            const pathSync = require('path');
+            const osSync = require('os');
+            const homeDir = osSync.homedir();
+            const candidates = [
+                pathSync.join(homeDir, '.gemini', 'antigravity', 'plugins', 'dashboard.html')
+            ];
+            let targetHtml = null;
+            for (const p of candidates) {
+                if (fsSync.existsSync(p)) {
+                    targetHtml = p;
+                    break;
+                }
+            }
+            if (targetHtml) {
+                try {
+                    let statsToInject = (typeof usageStatsCache !== 'undefined' && usageStatsCache.data) ? usageStatsCache.data : null;
+                    if (statsToInject) {
+                        let htmlContent = fsSync.readFileSync(targetHtml, 'utf8');
+                        const dataPattern = /const statsData = \{[\s\S]*?\};/;
+                        const newStatement = 'const statsData = ' + JSON.stringify(statsToInject) + ';';
+                        if (dataPattern.test(htmlContent)) {
+                            htmlContent = htmlContent.replace(dataPattern, newStatement);
+                            fsSync.writeFileSync(targetHtml, htmlContent, 'utf8');
+                        }
+                    }
+                } catch(e) {}
+                if (electron_1.shell && typeof electron_1.shell.openPath === 'function') {
+                    await electron_1.shell.openPath(targetHtml);
+                } else if (electron_1.shell && typeof electron_1.shell.openExternal === 'function') {
+                    await electron_1.shell.openExternal('file:///' + targetHtml.replace(/\\\\/g, '/'));
+                }
+                return { success: true, path: targetHtml };
+            }
+            return { success: false, error: 'dashboard.html 未找到' };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+`;
+      }
+
+      const lastBrace = ipcCode.lastIndexOf("}");
+      if (lastBrace !== -1) {
+        ipcCode = ipcCode.substring(0, lastBrace) + newHandlers + '\n}';
         fs.writeFileSync(ipcPath, ipcCode, 'utf8');
-        log('ipcHandlers.js injected with token:get-count IPC handler.');
+        log('ipcHandlers.js injected with token and usage intelligence IPC handlers.');
       }
     }
   }
 
-  // 5. Inject complete Chinese Localization + Token Counter + Universal Loader directly into preload.js
+  // 5. Inject complete Chinese Localization + Token Counter + Usage Intelligence directly into preload.js
   const preloadPath = path.join(EXTRACT_DIR, 'dist', 'preload.js');
   if (!fs.existsSync(preloadPath)) {
     throw new Error('preload.js not found in extracted asar!');
@@ -264,6 +475,7 @@ function applyPatch() {
   const cleanMarkers = [
     '// ================= Antigravity Universal Plugin Loader =================',
     '// ==================== Context Token Counter Plugin ====================',
+    '// Antigravity Plugin: 📊 用量智脑 (Usage Intelligence)',
     '// Antigravity Chinese Localization Engine'
   ];
   for (const m of cleanMarkers) {
@@ -282,48 +494,9 @@ function applyPatch() {
   const p2_code = fs.existsSync(p2_path) ? fs.readFileSync(p2_path, 'utf8') : '';
   const p3_code = fs.existsSync(p3_path) ? fs.readFileSync(p3_path, 'utf8') : '';
 
-  const microLoaderCode = `
-// ================= Antigravity Universal Plugin Loader =================
-(function() {
-  try {
-    const fs = require('fs');
-    const path = require('path');
-    const os = require('os');
-    const pluginsDir = path.join(os.homedir(), '.gemini', 'antigravity', 'plugins');
-    const configFile = path.join(pluginsDir, 'plugins.json');
-    
-    let config = { plugins: {} };
-    if (fs.existsSync(configFile)) {
-      try { config = JSON.parse(fs.readFileSync(configFile, 'utf8')); } catch (e) {}
-    }
-
-    if (fs.existsSync(pluginsDir)) {
-      const files = fs.readdirSync(pluginsDir).filter(f => f.endsWith('.js') && !f.startsWith('_')).sort();
-      for (const file of files) {
-        if (file === '01-chinese-localization.js' || file === '02-context-token-counter.js' || file === '03-usage-intelligence.js') continue;
-        const pluginInfo = (config.plugins && config.plugins[file]) || { enabled: true };
-        if (pluginInfo.enabled !== false) {
-          try {
-            const fullPath = path.join(pluginsDir, file);
-            const code = fs.readFileSync(fullPath, 'utf8');
-            const fn = new Function('require', 'process', 'console', 'document', 'window', '__dirname', '__filename', code);
-            fn(require, process, console, document, window, pluginsDir, fullPath);
-            console.log('[AG-PluginLoader] Successfully loaded extra plugin: ' + file);
-          } catch (err) {
-            console.error('[AG-PluginLoader] Failed to load ' + file + ':', err);
-          }
-        }
-      }
-    }
-  } catch (e) {
-    console.error('[AG-PluginLoader] Error in loader initialization:', e);
-  }
-})();
-`;
-
-  preloadCode = preloadCode + '\n\n' + p1_code + '\n\n' + p2_code + '\n\n' + p3_code + '\n\n' + microLoaderCode + '\n';
+  preloadCode = preloadCode + '\n\n' + p1_code + '\n\n' + p2_code + '\n\n' + p3_code + '\n';
   fs.writeFileSync(preloadPath, preloadCode, 'utf8');
-  log('preload.js injected with complete Chinese Localization, Token Counter, Usage Intelligence & Universal Loader.');
+  log('preload.js injected with complete Chinese Localization, Token Counter & Usage Intelligence.');
 
   // 6. Inject Menu localization
   const menuPath = path.join(EXTRACT_DIR, 'dist', 'menu.js');
@@ -401,10 +574,10 @@ try {
     log('loadingOverlay.js updated.');
   }
 
-  // 8. Repack into asar
-  log('Repacking asar with @electron/asar...');
+  // 8. Repack into asar with pure JS 4-byte aligned packer
+  log('Repacking asar with perfect 4-byte alignment...');
   if (fs.existsSync(TEMP_ASAR)) fs.unlinkSync(TEMP_ASAR);
-  execSync(`npx -y @electron/asar pack "${EXTRACT_DIR}" "${TEMP_ASAR}"`, { stdio: 'pipe', windowsHide: true });
+  packAsarPure(EXTRACT_DIR, TEMP_ASAR);
 
   // 9. Deploy to resources/app.asar and resources/app
   log('Deploying patched package...');
