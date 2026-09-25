@@ -435,7 +435,7 @@ function applyPatch() {
                         const dataPattern = /const statsData = \{[\s\S]*?\};/;
                         const newStatement = 'const statsData = ' + JSON.stringify(statsToInject) + ';';
                         if (dataPattern.test(htmlContent)) {
-                            htmlContent = htmlContent.replace(dataPattern, newStatement);
+                            htmlContent = htmlContent.replace(dataPattern, () => newStatement);
                             fsSync.writeFileSync(targetHtml, htmlContent, 'utf8');
                         }
                     }

@@ -38,10 +38,13 @@ def print_error(msg):
 def find_antigravity_resources():
     candidates = [
         Path.home() / "AppData" / "Local" / "Programs" / "antigravity" / "resources",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "antigravity" / "resources",
         Path("C:/Program Files/antigravity/resources"),
         Path("C:/Program Files (x86)/antigravity/resources"),
     ]
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        candidates.insert(1, Path(localappdata) / "Programs" / "antigravity" / "resources")
+
     for p in candidates:
         if p.exists() and (p / "app.asar").exists():
             return p
@@ -178,9 +181,13 @@ def main():
     collector_py = target_plugins_dir / "collector.py"
     dashboard_html = target_plugins_dir / "dashboard.html"
     try:
+        # 确保使用控制台版 python.exe 而非 pythonw.exe 执行采集
+        py_cli = Path(sys.executable).parent / "python.exe"
+        py_exec = str(py_cli) if py_cli.exists() else sys.executable
+
         # 执行数据采集生成实时统计
         res_collect = subprocess.run(
-            [sys.executable, str(collector_py), "--json"],
+            [py_exec, str(collector_py), "--json"],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -192,15 +199,13 @@ def main():
             # 注入到本地的 dashboard.html 中
             if dashboard_html.exists():
                 html_txt = dashboard_html.read_text(encoding="utf-8", errors="ignore")
-                marker = "const statsData = "
-                idx1 = html_txt.find(marker)
-                if idx1 != -1:
-                    idx2 = html_txt.find(";\n    setTimeout", idx1)
-                    if idx2 != -1:
-                        new_html = html_txt[:idx1 + len(marker)] + json.dumps(user_stats) + html_txt[idx2:]
-                        dashboard_html.write_text(new_html, encoding="utf-8")
-                        total_tok = user_stats.get("summary", {}).get("total_tokens", 0)
-                        print_success(f"成功同步本地真实统计数据 (已累计记录 {total_tok:,} Tokens)")
+                pattern = re.compile(r"const statsData = \{[\s\S]*?\};")
+                replacement = f"const statsData = {json.dumps(user_stats)};"
+                if pattern.search(html_txt):
+                    new_html = pattern.sub(lambda _: replacement, html_txt)
+                    dashboard_html.write_text(new_html, encoding="utf-8")
+                    total_tok = user_stats.get("summary", {}).get("total_tokens", 0)
+                    print_success(f"成功同步本地真实统计数据 (已累计记录 {total_tok:,} Tokens)")
         else:
             print_warn("暂未扫描到历史会话记录（首次使用），已使用纯净模板就绪")
     except Exception as e:
