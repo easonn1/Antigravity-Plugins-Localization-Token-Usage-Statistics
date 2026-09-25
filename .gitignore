@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Workspace & Backup
+workspace/
+temp_asar/
+*.bak
+*.patched
+*.tmp
+
+# Analytics data & sensitive caches
+antigravity_stats_cache.json
+dashboard.html
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

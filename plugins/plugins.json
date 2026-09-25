@@ -1,0 +1,24 @@
+﻿{
+    "description":  "Antigravity Universal Plugin Configuration",
+    "version":  "1.0.0",
+    "plugins":  {
+                    "01-chinese-localization.js":  {
+                                                       "priority":  10,
+                                                       "description":  "全局界面、菜单、实时状态与各类组件完整汉化",
+                                                       "name":  "中文汉化包 (Chinese Localization)",
+                                                       "enabled":  true
+                                                   },
+                    "02-context-token-counter.js":  {
+                                                        "priority":  20,
+                                                        "description":  "输入框底部实时统计当前会话 Token 消耗比例与上限",
+                                                        "name":  "上下文 Token 实时统计徽标 (Context Token Counter)",
+                                                        "enabled":  true
+                                                    },
+                    "03-usage-intelligence.js":  {
+                                                     "priority":  30,
+                                                     "description":  "Antigravity 本地深度分析：Token消耗大盘、Prompt缓存节省率、思考Token占比与活跃热力图",
+                                                     "name":  "📊 用量智脑 (Usage Intelligence)",
+                                                     "enabled":  true
+                                                 }
+                }
+}
