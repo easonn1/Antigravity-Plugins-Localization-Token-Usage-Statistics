@@ -9,12 +9,120 @@ Antigravity 插件自动守护脚本 v3.0 (Real-Time File Watcher + Periodic Fal
 
 import os
 import sys
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import subprocess
 import logging
 import time
 import threading
 from pathlib import Path
 from datetime import datetime
+
+# ================= Node.js locator (generated block - keep self-contained) =========
+# On other people's machines node.exe often exists but is NOT reachable through PATH:
+#   * Node installed after the session/Explorer started (stale environment block)
+#   * nvm-windows / fnm / volta / scoop / chocolatey layouts (per-version dirs)
+#   * a portable node.exe unzipped somewhere
+# subprocess.run(["node", ...]) then raises FileNotFoundError and the whole patch
+# silently fails, so resolve the real executable once and cache it.
+_NODE_BIN_CACHE = {}
+
+
+def find_node(quiet=False):
+    """Return a usable node.exe path, or None. Honours ANTIGRAVITY_NODE override."""
+    if "p" in _NODE_BIN_CACHE:
+        return _NODE_BIN_CACHE["p"]
+
+    import glob
+    import subprocess
+
+    def env(*names):
+        for n in names:
+            v = os.environ.get(n)
+            if v:
+                return v
+        return None
+
+    roots = []
+    pf = env("PROGRAMFILES", "ProgramFiles")
+    pf86 = env("ProgramFiles(x86)", "PROGRAMFILES(X86)")
+    lapp = env("LOCALAPPDATA")
+    user = env("USERPROFILE")
+    appd = env("APPDATA")
+    if pf:
+        roots.append(os.path.join(pf, "nodejs"))
+    if pf86:
+        roots.append(os.path.join(pf86, "nodejs"))
+    if lapp:
+        roots.append(os.path.join(lapp, "Programs", "nodejs"))
+        roots.append(os.path.join(lapp, "fnm", "node-versions", "*", "installation"))
+    if user:
+        roots.append(os.path.join(user, "scoop", "apps", "nodejs", "current"))
+        roots.append(os.path.join(user, "scoop", "apps", "nodejs-lts", "current"))
+        roots.append(os.path.join(user, ".volta", "bin"))
+        roots.append(os.path.join(user, "AppData", "Local", "Microsoft", "WinGet", "Links"))
+    if appd:
+        roots.append(os.path.join(appd, "nvm"))            # nvm-windows stores
+        roots.append(os.path.join(appd, "nvm", "*"))       # ...\nvm\v22.11.0\node.exe
+        roots.append(os.path.join(appd, "fnm", "node-versions", "*", "installation"))
+    roots.append(env("NVM_SYMLINK") or "")
+    roots.append(env("N_PREFIX") or "")
+    roots.append(env("VOLTA_HOME") and os.path.join(env("VOLTA_HOME"), "bin") or "")
+    roots.append(env("FNM_CORE_PACKAGES_HOME") or "")
+    roots.append(r"C:\nodejs")
+    roots.append(env("ProgramData") and os.path.join(env("ProgramData"), "chocolatey", "bin") or "")
+
+    cands = []
+    override = env("ANTIGRAVITY_NODE", "AG_NODE")
+    if override:
+        cands.append(override if override.lower().endswith(".exe") else os.path.join(override, "node.exe"))
+    found = None
+    try:
+        import shutil as _sh
+        found = _sh.which("node")
+    except Exception:
+        found = None
+    if found:
+        cands.append(found)
+    for r in roots:
+        if not r:
+            continue
+        for g in (glob.glob(os.path.join(r, "node.exe")) + glob.glob(os.path.join(r, "*", "node.exe"))):
+            cands.append(g)
+
+    seen = set()
+    for c in cands:
+        if not c:
+            continue
+        key = os.path.normcase(os.path.abspath(c))
+        if key in seen:
+            continue
+        seen.add(key)
+        if not os.path.isfile(c):
+            continue
+        flags = 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW: pythonw must not flash a console
+        try:
+            r = subprocess.run([c, "-v"], capture_output=True, text=True, timeout=15,
+                               creationflags=flags, encoding="utf-8", errors="replace")
+            if r.returncode == 0 and r.stdout.strip().startswith("v"):
+                if not quiet and found and key != os.path.normcase(os.path.abspath(found)):
+                    try:
+                        print("  [i] node.exe resolved outside PATH: %s (%s)" % (c, r.stdout.strip()))
+                    except Exception:
+                        pass  # pythonw.exe has no stdout - never let the locator crash the guard
+                _NODE_BIN_CACHE["p"] = c
+                return c
+        except Exception:
+            continue
+    _NODE_BIN_CACHE["p"] = None
+    return None
+# ================= end generated Node.js locator block =================
+
 
 # === 路径配置 ===
 HOME = Path.home()
@@ -95,9 +203,11 @@ def run_patch():
     try:
         creation_flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
         result = subprocess.run(
-            ['node', str(PATCH_ENGINE), 'patch'],
+            [find_node() or 'node', str(PATCH_ENGINE), 'patch'],
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=120,
             cwd=str(PATCH_ENGINE.parent),
             creationflags=creation_flags
@@ -223,7 +333,8 @@ def live_sync_worker():
     """实时 CDP Token 同步引擎：无论会话如何切换，实时计算并秒级推送到前端徽章"""
     import urllib.request, socket, base64, json
     brain_dir = os.path.expanduser(r'~/.gemini/antigravity/brain')
-    log_path = os.path.expanduser(r'~\AppData\Roaming\Antigravity\logs\language_server.log')
+    roaming_dir = os.environ.get('APPDATA') or os.path.expanduser(r'~\AppData\Roaming')
+    log_path = os.path.join(roaming_dir, 'Antigravity', 'logs', 'language_server.log')
     last_pushed_mtime = 0
     last_pushed_file = None
 

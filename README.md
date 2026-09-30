@@ -44,6 +44,10 @@
 2. 已安装 [Node.js](https://nodejs.org/) (推荐 LTS 18 或 20+)
 3. 已安装 [Python](https://www.python.org/) 3.8+ (安装时请务必勾选 `Add Python to PATH`)
 
+> ⚠️ **必须先解压再运行**：不要直接在 WinRAR / 7-Zip 压缩包里双击 `.bat`。
+> 预览模式只会释放脚本本身，`manager\` 目录并不存在，安装必然失败。
+> 另：新装完 Node.js / Python 后请**关闭原窗口重新双击**，旧窗口读不到刷新后的 PATH。
+
 ### ⚡ 部署步骤
 1. **下载或克隆本仓库**：
    ```bash
@@ -135,12 +139,41 @@ Antigravity-Plugins-Localization-Token-Usage-Statistics/
 
 **绝对不会！**
 本项目的所有子进程调用（包含 Node 打包、Python 数据采集、守护轮询）均显式声明了 `CREATE_NO_WINDOW` 与 `windowsHide: true`，开机通过轻量 VBS 脚本隐蔽引导，实现 100% 纯净无黑框运行。
+
+> 补充：`node.exe` 现在不再只依赖 PATH。安装器与开机守护都会自动探测
+> `Program Files\nodejs`、nvm-windows、fnm、volta、scoop、chocolatey 以及便携目录，
+> 全部找不到时也可以手动粘贴 `node.exe` 路径继续安装。
+> 若希望守护进程长期稳定，仍建议把 Node.js 正常加入系统 PATH。
 </details>
 
 <details>
 <summary><b>Q3: 如果我想彻底恢复官方原版，该怎么操作？</b></summary>
 
 直接双击运行 **`一键恢复官方原版.bat`** 即可。安装时系统会自动创建官方原版的 `app.asar.bak`。恢复工具会一秒将官方备份完整替换回位，并清理自启动项，不残留任何修改。
+</details>
+
+<details>
+<summary><b>Q4: 在别人电脑上一闪而过，报 “'xxx' 不是内部或外部命令 / 系统找不到指定的路径” 还带乱码？</b></summary>
+
+**这是启动脚本的文件编码问题，与 Node.js 无关。**
+`.bat` 是 UTF-8 且内含中文时，脚本里那句 `chcp 65001` 会在 cmd.exe 自己读取批处理文件的中途切换控制台代码页，
+导致 cmd 的字节偏移错位、从半行开始执行，于是出现 `'cho'`、`'neq'`、`'噺部署'` 这类“不是内部或外部命令”。
+
+本仓库的启动脚本已重构为**纯 ASCII**：所有中文提示改由 Python 输出（Python 端使用 UTF-8 并跟随 `chcp 65001` 正常显示），
+批处理本身不再含有任何非 ASCII 字节，因此在 GBK(936)、UTF-8(65001) 两种控制台代码页下都能稳定运行。
+如果你是自行改脚本，请遵守：**不要往 `.bat` 里写中文**。
+</details>
+
+<details>
+<summary><b>Q5: 提示“未检测到 Node.js”，但本机其实装了 Node？</b></summary>
+
+常见三种原因：
+1. Node 装在 nvm / fnm / volta / scoop / 便携目录，PATH 里没有 `node.exe`（新版本安装器已支持自动探测与手动指定路径）；
+2. 安装 Node 之前就已经打开了脚本窗口 —— PATH 广播只对新进程生效，**关掉重新双击**；
+3. 以**管理员身份**运行时用的是管理员账号的环境变量，普通用户装的 Node 可能看不见。
+
+另外，若 Antigravity 安装在 `C:\Program Files\`，写入 `app.asar` 必须管理员权限；
+安装器现在会在环境检查阶段直接做写权限探测并明确提示，而不是等到备份那一步才失败。
 </details>
 
 ---

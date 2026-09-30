@@ -1,0 +1,24 @@
+# Why this file exists: on other people's machines the one-click launchers used to
+# die with "'cho' / 'neq' / 噺部署 is not recognized ...".  Two things caused it:
+#   1) UTF-8 Chinese bytes inside a .bat + `chcp 65001` run from the same file makes
+#      cmd.exe desync its own batch read offset (it resumes mid-line).
+#   2) core.autocrlf only fixes `git clone`; GitHub's "Download ZIP" hands out the
+#      stored blob as-is, so every ZIP user got a different byte layout than the dev.
+# The launchers are now pure ASCII (Chinese comes from Python), and `-text` below
+# freezes their exact CRLF bytes into the repository so clone and ZIP agree.
+* text=auto
+
+# Ship these byte-for-byte, no EOL conversion in either direction.
+*.bat  -text
+*.cmd  -text
+*.vbs  -text
+*.ps1  -text
+
+*.py    text eol=lf
+*.js    text eol=lf
+*.json  text eol=lf
+*.html  text eol=lf
+*.md    text eol=lf
+
+*.png binary
+*.ico binary
