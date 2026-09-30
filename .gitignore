@@ -21,3 +21,12 @@ antigravity_dashboard.html
 Thumbs.db
 .vscode/
 .idea/
+
+# build artifacts (setup.exe / onedir tree / staged node)
+stage/
+dist/
+build/
+*.spec
+
+# sandbox test scratch (never commit: contains a copy of app.asar)
+.sandbox*/

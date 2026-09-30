@@ -37,7 +37,19 @@
 
 ## 🚀 一键全量部署（极简安装，绝不出错）
 
-本套件经过严格的跨平台与环境适配测试，提供全自动化的防呆安装器，零命令行门槛。
+### 方式一：下载安装包（推荐，什么都不用装）
+
+| 文件 | 说明 |
+| --- | --- |
+| `AntigravityPlugins-Setup.exe` | 安装向导：内置便携版 Node.js 与 Python 运行时，含卸载项 |
+| `AntigravityPlugins-portable-win-x64.zip` | 免安装绿色版，解压后运行 `bin\AntigravityPlugins.exe --deploy` |
+
+最新发布地址： <https://github.com/easonn1/Antigravity-Plugins-Localization-Token-Usage-Statistics/releases/latest>
+
+> 1.1.0 起安装包自带运行环境，**不再需要**另外安装 Node.js 或 Python；
+> 装完后在 `设置 - 应用` 里可以直接卸载，卸载时会询问是否同时恢复官方原版。
+
+### 方式二：源码运行（需要自己装环境）
 
 ### 📋 前置要求
 1. **Windows 10 / 11** 操作系统

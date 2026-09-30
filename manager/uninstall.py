@@ -18,6 +18,45 @@ import subprocess
 import time
 from pathlib import Path
 
+# ---------------- 交互模式：与 install.py 一致，无人值守时不能卡在 input() ----------------
+def _is_tty():
+    try:
+        return bool(sys.stdout) and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+INTERACTIVE = _is_tty()
+_CLI_ARGS = [str(a).lower() for a in sys.argv[1:]]
+AUTO_YES = ("--yes" in _CLI_ARGS) or ("-y" in _CLI_ARGS) or (not INTERACTIVE)
+
+
+def confirm(prompt, default=True):
+    if AUTO_YES:
+        return default
+    try:
+        return input(prompt).strip().lower() in ("", "y", "yes", "是")
+    except Exception:
+        return default
+
+
+def ask_text(prompt, default=""):
+    if AUTO_YES:
+        return default
+    try:
+        return input(prompt).strip().strip('"\'')
+    except Exception:
+        return default
+
+
+def pause(prompt="\n按回车键继续..."):
+    if AUTO_YES:
+        return
+    try:
+        input(prompt)
+    except Exception:
+        pass
+
 # ================= Node.js locator (generated block - keep self-contained) =========
 # On other people's machines node.exe often exists but is NOT reachable through PATH:
 #   * Node installed after the session/Explorer started (stale environment block)
@@ -134,6 +173,15 @@ def get_startup_dir():
     return Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 def find_antigravity_resources():
+    # 与 install.py 保持一致：ANTIGRAVITY_RESOURCES 可显式指定（便携安装/自定义盘符/打包自测）
+    override = os.environ.get("ANTIGRAVITY_RESOURCES")
+    if override:
+        from pathlib import Path as _P
+        p = _P(override)
+        if (p / "app.asar").exists() or (p / "app.asar.bak").exists():
+            return p
+        if (p / "resources" / "app.asar").exists():
+            return p / "resources"
     candidates = [
         Path.home() / "AppData" / "Local" / "Programs" / "antigravity" / "resources",
         Path("C:/Program Files/antigravity/resources"),
@@ -165,7 +213,13 @@ def kill_process_by_name(name):
 def terminate_guard_processes():
     try:
         # 使用原生 PowerShell / WMI 查找并安全终止守护进程，无需安装任何 pip 第三方模块
-        ps_cmd = "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*auto_patch_guard*' -or $_.CommandLine -like '*auto_patcher*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+        # 打包版守护的命令行是 "AntigravityPlugins.exe --guard"，不含 auto_patch_guard 字样，
+        # 只按脚本名匹配会让卸载后的后台进程继续占用文件（install 目录也就删不掉）。
+        ps_cmd = ("Get-CimInstance Win32_Process | Where-Object { "
+                  "$_.CommandLine -like '*auto_patch_guard*' -or "
+                  "$_.CommandLine -like '*auto_patcher*' -or "
+                  "$_.CommandLine -like '*--guard*' } | "
+                  "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }")
         subprocess.run(
             ["powershell", "-NoProfile", "-Command", ps_cmd],
             capture_output=True,
@@ -193,7 +247,7 @@ def main():
     resources_dir = find_antigravity_resources()
     if not resources_dir:
         print(f"\n{RED}未自动定位到 Antigravity 安装目录！{RESET}")
-        custom = input("请输入 Antigravity 根目录或 resources 文件夹路径: ").strip().strip('\"\'')
+        custom = ask_text("请输入 Antigravity 根目录或 resources 文件夹路径: ")
         p = Path(custom)
         if (p / "resources" / "app.asar").exists() or (p / "resources" / "app.asar.bak").exists():
             resources_dir = p / "resources"
@@ -201,7 +255,7 @@ def main():
             resources_dir = p
         else:
             print(f"{RED}指定的路径无效或未包含 app.asar，卸载中止。{RESET}")
-            input("\n按回车键退出...")
+            pause("\n按回车键退出...")
             sys.exit(1)
 
     print(f"已锁定核心目录: {resources_dir}")
@@ -251,7 +305,7 @@ def main():
             print(f"  {GREEN}[OK] 成功从官方原生备份 (app.asar.bak) 秒级完整还原！{RESET}")
         except PermissionError:
             print(f"  {RED}[X] 权限不足！请右键【一键恢复官方原版.bat】选择【以管理员身份运行】后重试！{RESET}")
-            input("\n按回车键退出...")
+            pause("\n按回车键退出...")
             sys.exit(1)
         except Exception as e:
             print(f"  {RED}[X] 还原过程发生错误: {e}{RESET}")
@@ -264,7 +318,7 @@ def main():
     print(f"\n{GREEN}{BOLD}{'='*64}{RESET}")
     print(f"{GREEN}{BOLD}  * 官方原版环境已完整恢复！所有修改已完全撤销。{RESET}")
     print(f"{GREEN}{BOLD}{'='*64}{RESET}")
-    input("\n按回车键退出...")
+    pause("\n按回车键退出...")
 
 if __name__ == "__main__":
     main()

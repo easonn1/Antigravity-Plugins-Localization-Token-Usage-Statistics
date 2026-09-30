@@ -144,6 +144,52 @@ def print_warn(msg):
 def print_error(msg):
     print(f"  {RED}[X] {msg}{RESET}")
 
+
+# ---------------- 交互模式：无人值守 / 被安装器管道调用时不能卡在 input() -------------
+def _is_tty():
+    try:
+        return bool(sys.stdout) and sys.stdout.isatty()
+    except Exception:
+        return False
+
+
+INTERACTIVE = _is_tty()
+_CLI_ARGS = [str(a).lower() for a in sys.argv[1:]]
+# --yes / -y 显式无人值守；stdout 不是终端（安装器或脚本管道）时同样自动确认，
+# 否则 input() 会抛 EOFError，让一次本来成功的安装报成异常。
+AUTO_YES = ("--yes" in _CLI_ARGS) or ("-y" in _CLI_ARGS) or (not INTERACTIVE)
+NO_DAEMON = "--no-daemon" in _CLI_ARGS
+NO_INPUT_PREFIX = "--no-input" in _CLI_ARGS
+if not INTERACTIVE:
+    GREEN = YELLOW = CYAN = RED = BOLD = RESET = ""
+
+
+def confirm(prompt, default=True):
+    if AUTO_YES:
+        return default
+    try:
+        return input(prompt).strip().lower() in ("", "y", "yes", "是")
+    except Exception:
+        return default
+
+
+def ask_text(prompt, default=""):
+    if AUTO_YES:
+        return default
+    try:
+        return input(prompt).strip().strip('"\'')
+    except Exception:
+        return default
+
+
+def pause(prompt="\n按回车键继续..."):
+    if AUTO_YES:
+        return
+    try:
+        input(prompt)
+    except Exception:
+        pass
+
 def get_startup_dir():
     roaming = os.environ.get("APPDATA")
     if roaming and os.path.exists(roaming):
@@ -151,6 +197,16 @@ def get_startup_dir():
     return Path.home() / "AppData" / "Roaming" / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
 
 def find_antigravity_resources():
+    # 允许显式指定（便携安装 / 自定义盘符 / 打包自测沙箱）
+    override = os.environ.get("ANTIGRAVITY_RESOURCES")
+    if override:
+        p = Path(override)
+        if (p / "app.asar").exists():
+            return p
+        if (p / "resources" / "app.asar").exists():
+            return p / "resources"
+        print(f"  [!] ANTIGRAVITY_RESOURCES 指向的目录没有 app.asar，改用自动探测: {override}")
+
     candidates = [
         Path.home() / "AppData" / "Local" / "Programs" / "antigravity" / "resources",
         Path("C:/Program Files/antigravity/resources"),
@@ -187,6 +243,71 @@ def find_antigravity_resources():
                 print(f"  [i] 通过特征搜索定位到安装目录: {p}")
                 return p
     return None
+
+def find_pythonw():
+    """Locate a windowless pythonw.exe without hard-coding one install path.
+
+    The shipped startup script used to contain a fixed
+    `pythonw = "C:\\Program Files\\Python312\\pythonw.exe"`, so on a machine with
+    Python 3.13 / a per-user install / conda the boot guard silently never started
+    and the localization was lost after the first Antigravity update.
+    """
+    import glob
+    roots = [Path(sys.executable).parent]
+    lapp = os.environ.get("LOCALAPPDATA")
+    if lapp:
+        roots.append(Path(lapp) / "Programs" / "Python")
+        roots += [Path(x) for x in glob.glob(str(Path(lapp) / "Programs" / "Python" / "*"))]
+    for v in {os.environ.get("PROGRAMFILES"), os.environ.get("ProgramFiles"),
+              os.environ.get("PROGRAMFILES(X86)"), os.environ.get("ProgramFiles(x86)")}:
+        if v:
+            roots.append(Path(v))
+            roots += [Path(x) for x in glob.glob(str(Path(v) / "Python3*"))]
+    user = os.environ.get("USERPROFILE")
+    if user:
+        roots += [Path(user) / "anaconda3", Path(user) / "miniconda3"]
+    roots += [Path(x) for x in glob.glob("C:/Python3*")]
+
+    for name in ("pythonw.exe", "python.exe"):
+        for r in roots:
+            c = r / name
+            if c.is_file():
+                return str(c)
+    return None
+
+
+GUARD_VBS = """' Antigravity Plugin Guard - generated launcher, ASCII only.
+' Runs the auto-repatch daemon 15s after logon with no window at all.
+Set fso = CreateObject("Scripting.FileSystemObject")
+Set shell = CreateObject("WScript.Shell")
+Dim exe, args
+exe = "%(exe)s"
+args = "%(args)s"
+If fso.FileExists(exe) Then
+    WScript.Sleep 15000
+    shell.Run Chr(34) & exe & Chr(34) & " " & args, 0, False
+End If
+"""
+
+
+def write_guard_launcher(vbs_path, pythonw_bin=None, frozen_exe=None):
+    """Write the startup .vbs against the interpreter that actually exists here."""
+    if vbs_path is None:
+        return None
+    if frozen_exe:
+        exe, args = str(frozen_exe), '--guard'
+    elif pythonw_bin:
+        exe = str(pythonw_bin)
+        args = '"%s"' % (Path(vbs_path).parent / "auto_patch_guard.py")
+    else:
+        return None
+    try:
+        Path(vbs_path).write_bytes((GUARD_VBS % {"exe": exe, "args": args}).encode("ascii", "replace"))
+    except Exception as e:
+        print_warn("生成开机守护脚本失败 (%s)" % e)
+        return None
+    return Path(vbs_path)
+
 
 def kill_process_by_name(name):
     try:
@@ -247,7 +368,7 @@ def main():
         print("  方案 B：本机已有 node.exe（如 nvm/便携版），直接粘贴其完整路径给安装器。")
         manual = ""
         try:
-            manual = input("\n  请输入 node.exe 完整路径（留空则退出）: ").strip().strip('"\'')
+            manual = ask_text("\n  请输入 node.exe 完整路径（留空则退出）: ")
         except Exception:
             manual = ""
         if manual:
@@ -272,7 +393,7 @@ def main():
             except Exception:
                 subprocess.run(["cmd", "/c", "start", "", "https://nodejs.org/en/download/"],
                                capture_output=True)
-            input("\n按回车键退出安装...")
+            pause("\n按回车键退出安装...")
             sys.exit(1)
 
     # 检查 Python
@@ -283,7 +404,7 @@ def main():
     resources_dir = find_antigravity_resources()
     if not resources_dir:
         print_error("未自动找到 Antigravity 安装目录！")
-        custom = input("  请输入 Antigravity 根目录或 resources 文件夹路径: ").strip().strip('\"\'')
+        custom = ask_text("  请输入 Antigravity 根目录或 resources 文件夹路径: ")
         p_custom = Path(custom)
         if (p_custom / "resources" / "app.asar").exists():
             resources_dir = p_custom / "resources"
@@ -293,7 +414,7 @@ def main():
             print_success(f"已锁定自定义路径: {resources_dir}")
         else:
             print_error("指定的路径无效或未包含 app.asar，安装中止。")
-            input("\n按回车键退出安装...")
+            pause("\n按回车键退出安装...")
             sys.exit(1)
     else:
         print_success(f"已锁定 Antigravity 核心目录: {resources_dir}")
@@ -307,7 +428,7 @@ def main():
         print_error("当前账号没有写入该目录的权限（通常因为 Antigravity 装在了 Program Files）。")
         print("  请右键【一键全量部署.bat】→【以管理员身份运行】后重试。")
         print(f"  目标目录：{resources_dir}")
-        input("\n按回车键退出安装...")
+        pause("\n按回车键退出安装...")
         sys.exit(1)
 
     # 步骤 2: 安全关闭冲突进程
@@ -327,7 +448,7 @@ def main():
                 print_success(f"已成功创建官方原版备份: app.asar.bak ({bak_path.stat().st_size:,} 字节)")
             except PermissionError:
                 print_error("权限不足！请右键【一键全量部署.bat】选择【以管理员身份运行】后重试！")
-                input("\n按回车键退出安装...")
+                pause("\n按回车键退出安装...")
                 sys.exit(1)
         else:
             print_error("未找到 app.asar 文件！")
@@ -407,31 +528,38 @@ def main():
 
     # 步骤 7: 开机静默守护配置与进程启动
     print_step(7, TOTAL_STEPS, "配置开机静默防失效守护...")
-    vbs_src = target_manager_dir / "AntigravityPluginGuard.vbs"
-    if startup_dir.exists() and vbs_src.exists():
-        vbs_dst = startup_dir / "AntigravityPluginGuard.vbs"
-        shutil.copy2(vbs_src, vbs_dst)
-        print_success("已配置 Windows 开机静默自启 (0 黑框弹窗，防更新失效)")
-
-    # 启动后台守护
-    pythonw_candidates = [
-        Path(sys.executable).parent / "pythonw.exe",
-        Path("C:/Program Files/Python312/pythonw.exe"),
-        Path("C:/Program Files/Python311/pythonw.exe"),
-        Path("C:/Program Files/Python310/pythonw.exe"),
-    ]
-    pythonw_bin = None
-    for p in pythonw_candidates:
-        if p.exists():
-            pythonw_bin = str(p)
-            break
-
     guard_script = target_manager_dir / "auto_patch_guard.py"
-    if pythonw_bin and guard_script.exists():
+    pythonw_bin = find_pythonw()
+    frozen_exe = Path(sys.executable) if getattr(sys, "frozen", False) else None
+    vbs_path = write_guard_launcher(target_manager_dir / "AntigravityPluginGuard.vbs",
+                                   pythonw_bin=pythonw_bin, frozen_exe=frozen_exe)
+    if vbs_path is None:
+        # 找不到可用解释器时才退回随包的静态脚本（它只在你机器上有默认路径 Python 时才有效）
+        vbs_src = target_manager_dir / "AntigravityPluginGuard.vbs"
+        vbs_path = vbs_src if vbs_src.exists() else None
+    if startup_dir.exists() and vbs_path and Path(vbs_path).exists():
+        shutil.copy2(str(vbs_path), str(startup_dir / "AntigravityPluginGuard.vbs"))
+        print_success("已配置 Windows 开机静默自启 (0 黑框弹窗，防更新失效)")
+    elif not startup_dir.exists():
+        print_warn(f"未找到开机启动目录，跳过自启配置：{startup_dir}")
+        print("       软件自动更新后若汉化失效，重新双击一次【一键全量部署】即可。")
+    else:
+        print_warn("未能配置开机自启：本机没有找到可用的 Python/守护可执行文件。")
+        print("       软件自动更新后若汉化失效，重新双击一次【一键全量部署】即可。")
+
+    if frozen_exe:
+        daemon_cmd = [str(frozen_exe), "--guard"]
+    elif pythonw_bin and guard_script.exists():
+        daemon_cmd = [pythonw_bin, str(guard_script)]
+    else:
+        daemon_cmd = None
+    if NO_DAEMON:
+        print_warn("已按 --no-daemon 跳过后台守护启动（自测/无人值守环境用）")
+    if daemon_cmd and not NO_DAEMON:
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         subprocess.Popen(
-            [pythonw_bin, str(guard_script)],
+            daemon_cmd,
             cwd=str(target_manager_dir),
             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
             close_fds=True
@@ -448,8 +576,8 @@ def main():
     # 询问是否立即启动 Antigravity
     app_exe = resources_dir.parent / "Antigravity.exe"
     if app_exe.exists():
-        ans = input("\n是否立即启动 Antigravity 体验全新插件增强？(Y/n): ").strip().lower()
-        if ans in ("", "y", "yes"):
+        ans = confirm("\n是否立即启动 Antigravity 体验全新插件增强？(Y/n): ")
+        if ans:
             subprocess.Popen([str(app_exe)], cwd=str(app_exe.parent))
             print(f"{GREEN}[OK] Antigravity 正在启动中... 祝您编码愉快！{RESET}")
             time.sleep(2)
@@ -463,4 +591,4 @@ if __name__ == "__main__":
         print(f"\n{RED}安装发生异常: {e}{RESET}")
         import traceback
         traceback.print_exc()
-        input("\n按回车键退出...")
+        pause("\n按回车键退出...")
