@@ -69,6 +69,13 @@ function checkIsPatched() {
   return false;
 }
 
+// Paths the source archive stores *outside* the asar ("unpacked": true, bytes live in
+// resources/app.asar.unpacked/...). Since Antigravity 2.18.1 those entries exist - 293 of
+// them, the whole chrome-devtools-mcp package - and they carry no "offset" field, so the
+// old extractor skipped them silently and the repacked archive lost them: the main process
+// then died on require() and Antigravity would not start at all.
+let UNPACKED_PATHS = new Set();
+
 function extractAsarPure(asarPath, destDir) {
   const fd = fs.openSync(asarPath, 'r');
   const buf16 = Buffer.alloc(16);
@@ -77,32 +84,55 @@ function extractAsarPure(asarPath, destDir) {
   const headerBuf = Buffer.alloc(headerSize);
   fs.readSync(fd, headerBuf, 0, headerSize, 16);
   const header = JSON.parse(headerBuf.toString('utf8'));
-  const baseOffset = 16 + headerSize;
+  // The file data section starts at the next 4-byte boundary after the header JSON.
+  // Antigravity 2.17.0 happened to emit a header whose length was already a multiple of 4,
+  // so 16 + headerSize looked correct; 2.18.1's header is 276013 bytes, which made every
+  // extracted file start 3 bytes early (dist/menu.js began with ");" from the previous
+  // entry) and the repacked archive was pure syntax errors - Antigravity would not launch.
+  let baseOffset = 16 + headerSize;
+  baseOffset += (4 - (baseOffset % 4)) % 4;
+  const sidecar = path.join(path.dirname(asarPath), 'app.asar.unpacked');
+  let lost = 0;
 
-  function walk(node, curPath) {
+  function walk(node, curPath, rel) {
     if (!fs.existsSync(curPath)) fs.mkdirSync(curPath, { recursive: true });
     for (const name of Object.keys(node)) {
       const info = node[name];
       const targetPath = path.join(curPath, name);
+      const subRel = rel ? rel + '/' + name : name;
       if (info.files) {
-        walk(info.files, targetPath);
+        walk(info.files, targetPath, subRel);
+      } else if (info.unpacked) {
+        UNPACKED_PATHS.add(subRel);
+        const src = path.join(sidecar, ...subRel.split('/'));
+        if (fs.existsSync(src)) {
+          fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+          fs.copyFileSync(src, targetPath);
+        } else {
+          lost++;
+        }
       } else if (info.offset !== undefined) {
         const offset = baseOffset + parseInt(info.offset, 10);
         const size = parseInt(info.size, 10);
         const fileBuf = Buffer.alloc(size);
         fs.readSync(fd, fileBuf, 0, size, offset);
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
         fs.writeFileSync(targetPath, fileBuf);
       }
     }
   }
 
-  walk(header.files || {}, destDir);
+  walk(header.files || {}, destDir, '');
   fs.closeSync(fd);
+  if (lost) log('WARNING: ' + lost + ' unpacked entries had no file in app.asar.unpacked/');
+  if (UNPACKED_PATHS.size) log('Extracted ' + UNPACKED_PATHS.size + ' unpacked entries from the sidecar archive.');
 }
 
 function packAsarPure(srcDir, destFile) {
   const fileList = [];
-  
+  const sidecarList = [];
+  const sidecarDir = destFile + '.unpacked';
+
   function walkDir(dir, relPath) {
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     const node = {};
@@ -113,8 +143,14 @@ function packAsarPure(srcDir, destFile) {
         node[entry.name] = { files: walkDir(fullPath, subRel) };
       } else if (entry.isFile()) {
         const stat = fs.statSync(fullPath);
-        fileList.push({ fullPath, size: stat.size });
-        node[entry.name] = { size: stat.size, offset: '0' };
+        if (UNPACKED_PATHS.has(subRel)) {
+          // keep it out of the archive body, exactly like the official package does
+          node[entry.name] = { size: stat.size, unpacked: true };
+          sidecarList.push({ fullPath, rel: subRel, size: stat.size });
+        } else {
+          fileList.push({ fullPath, size: stat.size });
+          node[entry.name] = { size: stat.size, offset: '0' };
+        }
       }
     }
     return node;
@@ -128,7 +164,7 @@ function packAsarPure(srcDir, destFile) {
       const item = node[key];
       if (item.files) {
         updateOffsets(item.files);
-      } else if (item.size !== undefined) {
+      } else if (item.size !== undefined && !item.unpacked) {
         item.offset = String(curOffset);
         curOffset += item.size;
       }
@@ -170,6 +206,18 @@ function packAsarPure(srcDir, destFile) {
     fs.closeSync(inFd);
   }
   fs.closeSync(outFd);
+
+  // the unpacked entries must still be present on disk next to the new archive
+  for (const f of sidecarList) {
+    const dst = path.join(sidecarDir, ...f.rel.split('/'));
+    let same = false;
+    try { same = fs.existsSync(dst) && fs.statSync(dst).size === f.size; } catch (e) { same = false; }
+    if (!same) {
+      fs.mkdirSync(path.dirname(dst), { recursive: true });
+      fs.copyFileSync(f.fullPath, dst);
+    }
+  }
+  if (sidecarList.length) log('Kept ' + sidecarList.length + ' files in app.asar.unpacked/.');
 }
 
 function applyPatch() {

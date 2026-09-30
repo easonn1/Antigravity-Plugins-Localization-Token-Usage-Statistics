@@ -33,7 +33,7 @@ INSTALL_DIR = APP_DIR.parent if IS_FROZEN else Path(__file__).resolve().parent.p
 BUNDLE = Path(getattr(sys, "_MEIPASS", str(APP_DIR)))
 PAYLOAD = BUNDLE / "payload"
 PRODUCT = "Antigravity 插件增强套件"
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 
 SCRIPTS = {
     "deploy": ("manager", "install.py"),
