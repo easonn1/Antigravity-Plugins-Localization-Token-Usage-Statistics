@@ -33,7 +33,7 @@ INSTALL_DIR = APP_DIR.parent if IS_FROZEN else Path(__file__).resolve().parent.p
 BUNDLE = Path(getattr(sys, "_MEIPASS", str(APP_DIR)))
 PAYLOAD = BUNDLE / "payload"
 PRODUCT = "Antigravity 插件增强套件"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 
 SCRIPTS = {
     "deploy": ("manager", "install.py"),
@@ -44,9 +44,15 @@ SCRIPTS = {
 }
 
 
+QUIET_STDOUT = False
+
+
 def log(msg):
     try:
-        print(msg, flush=True)
+        # In passthrough/collect modes the child script's stdout IS the payload
+        # (e.g. collector.py --json), so diagnostics must go to stderr there.
+        stream = sys.stderr if QUIET_STDOUT else sys.stdout
+        print(msg, file=stream, flush=True)
     except Exception:
         pass
 
@@ -350,6 +356,9 @@ def main():
         if i + 1 < len(rest):
             resources = rest[i + 1]
             rest = rest[:i] + rest[i + 2:]
+    global QUIET_STDOUT
+    if mode.lower().endswith(".py") or mode in ("--collect", "--python"):
+        QUIET_STDOUT = True
     setup_env(resources)
 
     if mode in ("--uninstall", "-uninstall"):

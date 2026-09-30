@@ -424,21 +424,43 @@ function applyPatch() {
                 return { success: false, error: 'collector.py 未在插件目录中找到' };
             }
 
-            const candidatesPy = [
-                'C:\\\\Program Files\\\\Python312\\\\python.exe',
-                'C:\\\\Program Files\\\\Python311\\\\python.exe',
-                'C:\\\\Program Files\\\\Python310\\\\python.exe',
-                'python',
-                'py'
-            ];
-            let pythonBin = 'python';
-            for (const py of candidatesPy) {
-                try {
-                    if (py.includes('\\\\') && fsSync.existsSync(py)) {
-                        pythonBin = py;
-                        break;
-                    }
-                } catch(e) {}
+            const envSync = process.env;
+            function tryAbs(p) {
+                try { return !!(p && fsSync.existsSync(p)); } catch (e) { return false; }
+            }
+            function resolvePythonBin() {
+                const cands = [];
+                if (envSync.ANTIGRAVITY_PYTHON) cands.push(envSync.ANTIGRAVITY_PYTHON);
+                const pf = envSync.ProgramFiles || pathSync.join('C:', 'Program Files');
+                const lap = envSync.LOCALAPPDATA || '';
+                const vers = ['313', '312', '311', '310'];
+                for (const v of vers) cands.push(pathSync.join(pf, 'Python' + v, 'python.exe'));
+                if (lap) {
+                    for (const v of vers) cands.push(pathSync.join(lap, 'Programs', 'Python', 'Python' + v, 'python.exe'));
+                }
+                for (const p of cands) {
+                    if (tryAbs(p)) return p;
+                }
+                // PATH-resolved names cannot be checked with existsSync; actually run them.
+                for (const name of ['python', 'python3', 'py']) {
+                    try {
+                        cpSync.execFileSync(name, ['--version'], { windowsHide: true, stdio: 'ignore', timeout: 8000 });
+                        return name;
+                    } catch (e) {}
+                }
+                // No system Python at all: use the frozen dispatcher shipped by the
+                // installer, which runs a .py through the bundled interpreter.
+                const exeCands = [];
+                if (envSync.ANTIGRAVITY_PLUGINS_EXE) exeCands.push(envSync.ANTIGRAVITY_PLUGINS_EXE);
+                if (lap) exeCands.push(pathSync.join(lap, 'AntigravityPlugins', 'bin', 'AntigravityPlugins.exe'));
+                for (const p of exeCands) {
+                    if (tryAbs(p)) return p;
+                }
+                return null;
+            }
+            const pythonBin = resolvePythonBin();
+            if (!pythonBin) {
+                return { success: false, error: '未找到可用的 Python 解释器：请设置环境变量 ANTIGRAVITY_PYTHON 指向 python.exe，或重新运行安装器以部署随包运行时' };
             }
 
             return new Promise((resolve) => {

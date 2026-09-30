@@ -15,7 +15,7 @@ import queue
 from pathlib import Path
 
 PRODUCT = "Antigravity 插件增强套件"
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 DIR_NAME = "AntigravityPlugins"
 BATCH_HEAD = (
     "@echo off\r\n"

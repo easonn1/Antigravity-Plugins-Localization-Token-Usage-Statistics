@@ -1,5 +1,23 @@
 # 更新日志
 
+## v1.1.2 - 修复"用量与配额智脑"在无系统 Python 的机器上采集受阻
+
+全新机器（只装了 `AntigravityPlugins-Setup.exe`、没有单独安装 Python）打开用量大盘时报
+`用量数据采集受阻 / spawn python ENOENT`。原因是注入到 Antigravity 主进程的采集逻辑只会
+`spawn('python')`：候选列表里的裸命令名（`python` / `py`）因为不含路径分隔符而永远不会被选中，
+最终回落到默认值 `'python'`，而没有系统 Python 时它就 ENOENT。
+
+修复：
+
+- **解释器解析重写**：先查环境变量 `ANTIGRAVITY_PYTHON`，再扫常见安装目录（Program Files /
+  `%LOCALAPPDATA%\Programs\Python` 的 3.10–3.13），然后**真正执行** `python / python3 / py --version`
+  去探测 PATH（`existsSync` 看不到 PATH 里的命令），最后回落到安装器随包的冻结 dispatcher
+  （`%LOCALAPPDATA%\AntigravityPlugins\bin\AntigravityPlugins.exe`，以 `[exe, 脚本.py, 参数]` 形式
+  用内置解释器跑 collector.py）。都找不到时给出可读的中文提示，而不是裸 ENOENT。
+- **dispatcher 透传时保持 stdout 干净**：`--collect` / `<脚本.py>` 透传模式下，子脚本的 stdout 就是
+  数据载荷（collector.py 的 JSON），因此 `[runtime] …` 等诊断信息改走 stderr，避免污染 JSON 导致
+  前端 `JSON.parse` 失败。
+
 ## v1.1.1 - 修复 Antigravity 2.18.1 打补丁后无法启动
 
 新装到 2.18.1 的机器（例如刚下载官方安装包的全新虚拟机）点"一键全量部署"后 Antigravity 直接起不来，
