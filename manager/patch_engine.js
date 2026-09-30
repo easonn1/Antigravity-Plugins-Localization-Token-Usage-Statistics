@@ -7,8 +7,27 @@ const path = require('path');
 const os = require('os');
 const { execSync } = require('child_process');
 
-const APP_DIR = path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity');
-const RESOURCES_DIR = path.join(APP_DIR, 'resources');
+function resolveResourcesDir() {
+  const customArg = process.argv[3];
+  if (customArg && fs.existsSync(customArg) && (fs.existsSync(path.join(customArg, 'app.asar')) || fs.existsSync(path.join(customArg, 'app.asar.bak')))) {
+    return customArg;
+  }
+  const candidates = [
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'resources'),
+    path.join(process.env.PROGRAMFILES || 'C:\\Program Files', 'antigravity', 'resources'),
+    path.join(process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)', 'antigravity', 'resources'),
+    path.join(os.homedir(), 'AppData', 'Local', 'Programs', 'antigravity', 'resources')
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c) && (fs.existsSync(path.join(c, 'app.asar')) || fs.existsSync(path.join(c, 'app.asar.bak')))) {
+      return c;
+    }
+  }
+  return path.join(process.env.LOCALAPPDATA || '', 'Programs', 'antigravity', 'resources');
+}
+
+const RESOURCES_DIR = resolveResourcesDir();
+const APP_DIR = path.dirname(RESOURCES_DIR);
 const ASAR_PATH = path.join(RESOURCES_DIR, 'app.asar');
 const BAK_PATH = path.join(RESOURCES_DIR, 'app.asar.bak');
 
@@ -120,20 +139,14 @@ function packAsarPure(srcDir, destFile) {
   const headerObj = { files: rootFiles };
   let headerJson = JSON.stringify(headerObj);
   
-  // Ensure header JSON byte length is strictly a multiple of 4
+  // Ensure header JSON byte length is strictly a multiple of 4 (100% mathematically convergent)
   let headerBuf = Buffer.from(headerJson, 'utf8');
-  const remainder = headerBuf.length % 4;
-  if (remainder !== 0) {
-    const padCount = 4 - remainder;
-    headerObj.__pad = ' '.repeat(padCount > 10 ? padCount : padCount + 4);
+  let padCount = 0;
+  while (headerBuf.length % 4 !== 0) {
+    padCount++;
+    headerObj.__pad = ' '.repeat(padCount);
     headerJson = JSON.stringify(headerObj);
     headerBuf = Buffer.from(headerJson, 'utf8');
-    const rem2 = headerBuf.length % 4;
-    if (rem2 !== 0) {
-      headerObj.__pad = ' '.repeat(headerObj.__pad.length + 4 - rem2);
-      headerJson = JSON.stringify(headerObj);
-      headerBuf = Buffer.from(headerJson, 'utf8');
-    }
   }
 
   const headerSize = headerBuf.length;

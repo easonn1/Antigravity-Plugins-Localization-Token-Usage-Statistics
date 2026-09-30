@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-⚡ Antigravity 插件管理与拓展中心 (Antigravity Plugin Manager)
+* Antigravity 插件管理与拓展中心 (Antigravity Plugin Manager)
 Author: Google Antigravity Agentic Assistant
 """
 import os
 import sys
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 import json
 import shutil
 import subprocess
@@ -93,7 +100,7 @@ def is_antigravity_running():
 class PluginManagerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("⚡ Antigravity 插件管理与拓展中心")
+        self.root.title("* Antigravity 插件管理与拓展中心")
         self.root.geometry("780x560")
         self.root.minsize(680, 480)
 
@@ -119,7 +126,7 @@ class PluginManagerApp:
 
         title_lbl = tk.Label(
             header_frame,
-            text="⚡ Antigravity 插件管理与拓展中心",
+            text="* Antigravity 插件管理与拓展中心",
             font=("Segoe UI", 15, "bold"),
             fg="#ffffff",
             bg="#1e293b"
@@ -301,7 +308,7 @@ class PluginManagerApp:
         )
         self.log_text.pack(fill='both', expand=True)
 
-        self.append_log("⚡ Antigravity 插件管理中心就绪。")
+        self.append_log("* Antigravity 插件管理中心就绪。")
 
     def append_log(self, text):
         self.log_text.insert('end', text + '\n')
@@ -370,10 +377,10 @@ class PluginManagerApp:
         self.append_log(output)
         self.refresh_system_status()
         if success:
-            self.append_log("🎉 插件系统与 Micro-Loader 挂载成功！")
+            self.append_log("* 插件系统与 Micro-Loader 挂载成功！")
             messagebox.showinfo(
                 "部署成功",
-                "🎉 Antigravity 插件系统已成功挂载！\n\n- 深度中文汉化 已就绪\n- 上下文 Token 计数器 已就绪\n- 插件目录已接入通用加载器\n\n请正常重启 Antigravity 查看效果！"
+                "* Antigravity 插件系统已成功挂载！\n\n- 深度中文汉化 已就绪\n- 上下文 Token 计数器 已就绪\n- 插件目录已接入通用加载器\n\n请正常重启 Antigravity 查看效果！"
             )
         else:
             self.append_log("❌ 安装或挂载过程遇到提示，详情见上方日志。")
