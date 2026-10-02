@@ -1,5 +1,30 @@
 # 更新日志
 
+## v1.1.3 - 补丁失败不再能把 Antigravity 变砖
+
+2026-10-01 事故复盘：一位用户的 Antigravity 突然"双击完全没反应、也不写任何日志"。查下来是
+官方 `autoUpdater` 静默 `quitAndInstall` 升到 2.18.1，守护脚本 8 秒后自动重打补丁，写出了一个
+**整体错位 3 字节**的 `app.asar`（`package.json` 开头多出 `42 60 82`，JSON 解析失败；755 个文件
+全是语法错误；293 个 `unpacked` 条目丢失）。
+
+关键点在于：**对齐和 unpacked 这两个 bug 在 v1.1.1 就已经修好了**，但那台机器
+`~\.gemini\antigravity\manager\patch_engine.js` 还是 9/26 的旧版——修复合进了仓库，却没有再部署。
+而守护脚本日志里那句 `Verification PASSED` 只检查"文件在不在"，不检查"包能不能启动"，
+于是垃圾包被判定为成功，直接把 IDE 写死了。
+
+本次改动：
+
+- **部署前完整性闸门** `verifyArchive()`：打包完立刻把 `app.asar` 回读，与源树**逐字节比对**
+  （含 `unpacked` 侧车文件），并检查 header 可解析、`package.json` 可解析、`main` 入口存在、
+  内容不越界、`.js` 开头不是垃圾字节。`applyPatch()` 在**部署前**和**部署后**各跑一次，
+  任何一次不过就拒绝落盘并以非零码退出——已验证能拦住 10/1 那个真实坏包。
+- **新增体检命令** `node patch_engine.js verify`：不依赖源树，直接判断当前装着的 `app.asar`
+  是否结构完好、能否启动；`restore` 现在也会校验恢复结果。
+- **守护脚本失败即回滚**：`check_and_repair()` 打完补丁后调用真校验，不过就把官方
+  `app.asar.bak` 放回去并删除 `resources/app`。策略是**宁可暂时丢掉汉化插件，也绝不让 IDE 起不来**。
+- 部署环节提醒：修复只有进仓库是不够的，必须重新运行安装器（或"一键全量部署"）把
+  `manager/` 同步到 `~\.gemini\antigravity\manager`，否则机器上跑的还是旧引擎。
+
 ## v1.1.2 - 修复"用量与配额智脑"在无系统 Python 的机器上采集受阻
 
 全新机器（只装了 `AntigravityPlugins-Setup.exe`、没有单独安装 Python）打开用量大盘时报

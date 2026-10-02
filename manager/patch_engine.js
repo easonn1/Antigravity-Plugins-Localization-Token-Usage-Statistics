@@ -220,6 +220,156 @@ function packAsarPure(srcDir, destFile) {
   if (sidecarList.length) log('Kept ' + sidecarList.length + ' files in app.asar.unpacked/.');
 }
 
+// ---------------------------------------------------------------------------
+// Integrity gate
+//
+// The 2026-10-01 brick: this engine repacked app.asar after Antigravity's silent
+// auto-update, the archive was byte-shifted throughout (package.json no longer parsed,
+// every .js was a SyntaxError), yet the run logged "SUCCESS" and the guard logged
+// "Verification PASSED" - because both only asked whether the files *exist*.
+// verifyArchive() actually reads the archive back and compares it, file by file, to the
+// tree it was built from, so any alignment/offset/truncation bug fails closed instead of
+// deploying over a working install.
+// ---------------------------------------------------------------------------
+
+function asarIndex(archiveFile) {
+  const fd = fs.openSync(archiveFile, 'r');
+  const buf16 = Buffer.alloc(16);
+  fs.readSync(fd, buf16, 0, 16, 0);
+  const headerSize = buf16.readUInt32LE(12);
+  if (headerSize <= 0 || headerSize > fs.fstatSync(fd).size) {
+    fs.closeSync(fd);
+    throw new Error('implausible header size ' + headerSize);
+  }
+  const headerBuf = Buffer.alloc(headerSize);
+  fs.readSync(fd, headerBuf, 0, headerSize, 16);
+  let header;
+  try { header = JSON.parse(headerBuf.toString('utf8')); }
+  catch (e) { fs.closeSync(fd); throw new Error('header JSON does not parse: ' + e.message); }
+  let base = 16 + headerSize;
+  base += (4 - (base % 4)) % 4;
+  return { fd, header, base, size: fs.fstatSync(fd).size };
+}
+
+function flattenIndex(header, out) {
+  (function walk(node, rel) {
+    for (const name of Object.keys(node)) {
+      const info = node[name];
+      const r = rel ? rel + '/' + name : name;
+      if (info && info.files) walk(info.files, r);
+      else if (info && info.size !== undefined) out[r] = info;   // ignores the __pad key
+    }
+  })(header.files || {}, '');
+  return out;
+}
+
+function listTree(dir, rel, out) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    const r = rel ? rel + '/' + entry.name : entry.name;
+    if (entry.isDirectory()) listTree(full, r, out);
+    else if (entry.isFile()) out.push(r);
+  }
+  return out;
+}
+
+// Compare a packed archive against the tree it claims to have been built from.
+// srcDir may be null, in which case only self-consistency is checked.
+function verifyArchive(srcDir, archiveFile) {
+  const problems = [];
+  let idx;
+  try { idx = asarIndex(archiveFile); }
+  catch (e) { return { ok: false, problems: ['cannot read ' + path.basename(archiveFile) + ': ' + e.message] }; }
+
+  try {
+    const entries = flattenIndex(idx.header, {});
+    const sidecar = archiveFile + '.unpacked';
+
+    // a) no entry may point past the end of the archive
+    let maxEnd = 0;
+    for (const rel of Object.keys(entries)) {
+      const info = entries[rel];
+      if (info.unpacked) {
+        if (!fs.existsSync(path.join(sidecar, ...rel.split('/')))) problems.push('unpacked entry missing on disk: ' + rel);
+        continue;
+      }
+      maxEnd = Math.max(maxEnd, idx.base + Number(info.offset) + Number(info.size));
+    }
+    if (maxEnd > idx.size) problems.push(`content spans ${maxEnd} bytes but archive is ${idx.size} (truncated)`);
+
+    // b) package.json must parse and its "main" must resolve inside the archive
+    const pkg = entries['package.json'];
+    if (!pkg) problems.push('package.json is not in the archive');
+    else {
+      const raw = Buffer.alloc(Number(pkg.size));
+      fs.readSync(idx.fd, raw, 0, raw.length, idx.base + Number(pkg.offset));
+      let meta = null;
+      try { meta = JSON.parse(raw.toString('utf8')); }
+      catch (e) { problems.push('package.json does not parse: ' + e.message + ' (first bytes ' + raw.subarray(0, 6).toString('hex') + ')'); }
+      if (meta && meta.main) {
+        const main = meta.main.replace(/\\/g, '/').replace(/^\.\//, '');
+        if (!entries[main]) problems.push('package.json main "' + main + '" is not in the archive');
+      }
+    }
+
+    // c) every .js must still look like JavaScript (a shift shows up as leading junk)
+    let jsChecked = 0, jsFlagged = 0;
+    for (const rel of Object.keys(entries)) {
+      if (!rel.endsWith('.js') || entries[rel].unpacked) continue;
+      if (jsChecked++ > 400 || jsFlagged >= 5) break;
+      const info = entries[rel];
+      const head = Buffer.alloc(Math.min(64, Number(info.size)));
+      fs.readSync(idx.fd, head, 0, head.length, idx.base + Number(info.offset));
+      const first = head.toString('utf8').replace(/^\uFEFF/, '').trimStart().slice(0, 1);
+      if (info.size > 0 && !/["'/*(a-zA-Z_$]/.test(first)) {
+        jsFlagged++;
+        problems.push('js starts with junk: ' + rel + ' (' + head.subarray(0, 8).toString('hex') + ')');
+      }
+    }
+    if (jsFlagged >= 5) problems.push('(more shifted .js files suppressed)');
+
+    // d) the gold standard: byte-compare against the source tree
+    if (srcDir && fs.existsSync(srcDir)) {
+      const srcFiles = listTree(srcDir, '', []).sort();
+      const archFiles = Object.keys(entries).sort();
+      const srcSet = new Set(srcFiles), archSet = new Set(archFiles);
+      for (const rel of srcFiles) if (!archSet.has(rel)) problems.push('dropped from archive: ' + rel);
+      for (const rel of archFiles) if (!srcSet.has(rel)) problems.push('in archive but not in source: ' + rel);
+      let compared = 0;
+      for (const rel of srcFiles) {
+        const info = entries[rel];
+        if (!info || problems.length > 40) continue;
+        const srcBuf = fs.readFileSync(path.join(srcDir, ...rel.split('/')));
+        if (Number(info.size) !== srcBuf.length) { problems.push(`size drift ${rel}: source ${srcBuf.length} vs archive ${info.size}`); continue; }
+        if (info.unpacked) {
+          const side = path.join(sidecar, ...rel.split('/'));
+          if (!fs.existsSync(side)) continue;                 // already reported in (a)
+          if (!fs.readFileSync(side).equals(srcBuf)) problems.push('sidecar bytes differ: ' + rel);
+        } else {
+          const buf = Buffer.alloc(srcBuf.length);
+          fs.readSync(idx.fd, buf, 0, buf.length, idx.base + Number(info.offset));
+          if (!buf.equals(srcBuf)) problems.push('bytes differ: ' + rel);
+        }
+        compared++;
+      }
+      log(`Verified ${compared} files against the source tree.`);
+    }
+  } finally {
+    fs.closeSync(idx.fd);
+  }
+  return { ok: problems.length === 0, problems };
+}
+
+function abortIfBroken(archiveFile, srcDir, stage) {
+  const v = verifyArchive(srcDir, archiveFile);
+  if (v.ok) return;
+  log(`FATAL - ${stage}: archive failed verification, nothing was deployed.`);
+  for (const p of v.problems.slice(0, 25)) log('  * ' + p);
+  if (v.problems.length > 25) log(`  ... and ${v.problems.length - 25} more`);
+  process.exitCode = 1;
+  throw new Error('integrity gate: ' + v.problems[0]);
+}
+
 function applyPatch() {
   log('Starting patch process...');
   if (!fs.existsSync(RESOURCES_DIR)) {
@@ -662,6 +812,9 @@ try {
   if (fs.existsSync(TEMP_ASAR)) fs.unlinkSync(TEMP_ASAR);
   packAsarPure(EXTRACT_DIR, TEMP_ASAR);
 
+  // 8b. Integrity gate - refuse to ship an archive that could not boot.
+  abortIfBroken(TEMP_ASAR, EXTRACT_DIR, 'repacked archive');
+
   // 9. Deploy to resources/app.asar and resources/app
   log('Deploying patched package...');
   fs.copyFileSync(TEMP_ASAR, path.join(RESOURCES_DIR, 'app.asar.patched'));
@@ -678,6 +831,10 @@ try {
   }
   fs.cpSync(EXTRACT_DIR, appUnpacked, { recursive: true });
   log('Updated resources/app folder successfully.');
+
+  // 9b. Re-check what actually landed, so a locked or half-written copy (antivirus,
+  // a still-running Antigravity) cannot be reported as a successful patch.
+  abortIfBroken(ASAR_PATH, EXTRACT_DIR, 'installed app.asar');
 
   log('SUCCESS: Antigravity Universal Plugin Loader & Menus patched successfully!');
 }
@@ -697,7 +854,15 @@ function restoreOriginal() {
     try { fs.rmSync(appUnpacked, { recursive: true, force: true }); } catch (e) {}
     log('Removed resources/app folder.');
   }
-  log('SUCCESS: Restored to official state.');
+  const v = verifyArchive(null, ASAR_PATH);
+  if (!v.ok) {
+    log('WARNING - the restored app.asar still does not verify:');
+    for (const p of v.problems.slice(0, 10)) log('  * ' + p);
+    log('  Reinstall Antigravity from the official installer if it will not start.');
+    process.exitCode = 1;
+    return;
+  }
+  log('SUCCESS: Restored to official state (archive verified).');
 }
 
 const action = process.argv[2] || 'patch';
@@ -708,6 +873,17 @@ if (action === 'patch') {
 } else if (action === 'check') {
   const patched = checkIsPatched();
   console.log(patched ? 'PATCHED' : 'UNPATCHED');
+} else if (action === 'verify') {
+  // doctor mode: is the archive that is currently installed actually bootable?
+  const v = verifyArchive(null, ASAR_PATH);
+  const entries = (() => { try { const i = asarIndex(ASAR_PATH); const n = Object.keys(flattenIndex(i.header, {})).length; fs.closeSync(i.fd); return n; } catch (e) { return 0; } })();
+  console.log(`app.asar: ${ASAR_PATH}`);
+  console.log(`entries: ${entries}`);
+  console.log(v.ok ? 'VERIFY OK - archive is structurally sound and should boot.'
+                   : 'VERIFY FAILED - Antigravity cannot start with this archive:');
+  for (const p of v.problems.slice(0, 15)) console.log('  * ' + p);
+  if (v.problems.length > 15) console.log(`  ... and ${v.problems.length - 15} more problem(s)`);
+  process.exitCode = v.ok ? 0 : 1;
 } else {
-  console.log('Usage: node patch_engine.js [patch|restore|check]');
+  console.log('Usage: node patch_engine.js [patch|restore|check|verify] [resourcesDir]');
 }

@@ -17,6 +17,7 @@ if sys.platform == "win32":
         pass
 
 import subprocess
+import shutil
 import logging
 import time
 import threading
@@ -234,6 +235,43 @@ def run_patch():
         return False
 
 
+def verify_archive():
+    """让 patch_engine.js 把装好的 app.asar 回读一遍，判断它能不能启动。"""
+    try:
+        creation_flags = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
+        r = subprocess.run(
+            [find_node() or 'node', str(PATCH_ENGINE), 'verify'],
+            capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=90, cwd=str(PATCH_ENGINE.parent), creationflags=creation_flags
+        )
+        for line in (r.stdout or '').strip().split('\n')[:12]:
+            if line.strip():
+                (log.info if r.returncode == 0 else log.error)(f'  {line.strip()}')
+        return r.returncode == 0
+    except Exception as e:
+        log.error(f'verify_archive error: {e}')
+        return False
+
+
+def rollback_to_official(reason):
+    """2026-10-01 的教训：打包器写坏 app.asar 后，守护脚本还照样报告成功，
+    结果 Antigravity 完全打不开。任何一次修复之后都必须回读校验，
+    校验不过就把官方原始包放回去——宁可丢掉插件，也不能让 IDE 起不来。"""
+    if not BAK_PATH.exists():
+        log.error(f'{reason} - but app.asar.bak is missing, cannot roll back; Antigravity may not start.')
+        return False
+    try:
+        shutil.copyfile(BAK_PATH, ASAR_PATH)
+        app_dir = RESOURCES_DIR / 'app'
+        if app_dir.is_dir():
+            shutil.rmtree(app_dir, ignore_errors=True)
+        log.warning(f'{reason} - rolled back to the official app.asar. Antigravity starts again, plugins are off.')
+        return True
+    except Exception as e:
+        log.error(f'rollback failed: {e}')
+        return False
+
+
 def check_and_repair(force=False):
     """检查并修复（核心逻辑）"""
     if not RESOURCES_DIR.exists():
@@ -249,12 +287,17 @@ def check_and_repair(force=False):
     ensure_backup()
 
     if run_patch():
-        if is_patched():
+        if not verify_archive():
+            log.error('Patched archive failed the integrity gate.')
+            rollback_to_official('integrity gate rejected the patched archive')
+        elif is_patched():
             log.info('Verification PASSED. Plugins restored!')
         else:
-            log.warning('Patch ran but verification failed.')
+            log.warning('Patch ran but the plugin markers are missing.')
     else:
         log.error('Auto-recovery FAILED.')
+        if not verify_archive():
+            rollback_to_official('patch failed and the installed archive is unbootable')
 
 
 def watch_asar_file():
